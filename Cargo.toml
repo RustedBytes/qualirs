@@ -1,6 +1,6 @@
 [package]
 name = "qualirs"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 description = "Structural and architectural code smell detector for Rust"
 license = "MIT"
@@ -29,7 +29,7 @@ comfy-table = "7"
 # Config
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = "1.1"
 
 # File walking
 ignore = "0.4"
@@ -38,7 +38,7 @@ ignore = "0.4"
 flate2 = "1"
 tar = "0.4"
 tempfile = "3"
-ureq = { version = "2", default-features = false, features = ["gzip", "native-tls"] }
+ureq = { version = "3", default-features = false, features = ["gzip", "rustls"] }
 
 # Parallelism
 rayon = "1"
@@ -46,7 +46,7 @@ rayon = "1"
 # Error handling
 thiserror = "2"
 anyhow = "1"
-fixed-json = { version = "0.3.0", features = ["std"] }
+fixed-json = { version = "0.4.0", features = ["std"] }
 
 [profile.release]
 opt-level = "z"

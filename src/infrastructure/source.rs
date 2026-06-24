@@ -145,12 +145,12 @@ fn download_crate(
     let version = resolve_crate_version(name, version)?;
     let url = crates_io_download_url(name, &version);
     let response = ureq::get(&url)
-        .set("Accept", "application/octet-stream")
-        .set("User-Agent", user_agent())
+        .header("Accept", "application/octet-stream")
+        .header("User-Agent", user_agent())
         .call()
         .with_context(|| format!("download crate `{name}` version {version} from crates.io"))?;
 
-    let decoder = GzDecoder::new(response.into_reader());
+    let decoder = GzDecoder::new(response.into_body().into_reader());
     let mut archive = tar::Archive::new(decoder);
     archive
         .unpack(&unpack_dir)
@@ -211,12 +211,12 @@ fn latest_crate_version(name: &str) -> anyhow::Result<String> {
 
     let url = crates_io_metadata_url(name);
     let response = ureq::get(&url)
-        .set("Accept", "application/json")
-        .set("User-Agent", user_agent())
+        .header("Accept", "application/json")
+        .header("User-Agent", user_agent())
         .call()
         .with_context(|| format!("fetch crate metadata for `{name}` from crates.io"))?;
 
-    let metadata: CratesIoResponse = serde_json::from_reader(response.into_reader())
+    let metadata: CratesIoResponse = serde_json::from_reader(response.into_body().into_reader())
         .with_context(|| format!("parse crate metadata for `{name}` from crates.io"))?;
 
     Ok(metadata.krate.max_version)
