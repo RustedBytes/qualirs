@@ -97,8 +97,10 @@ pub struct PolicyConfig {
 /// User-facing precision mode for deciding which confidence levels are reported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum Precision {
     #[serde(alias = "Conservative")]
+    #[default]
     Conservative,
     #[serde(alias = "Balanced")]
     Balanced,
@@ -499,11 +501,6 @@ fn default_min_severity() -> crate::domain::smell::Severity {
     crate::domain::smell::Severity::Info
 }
 
-impl Default for Precision {
-    fn default() -> Self {
-        Self::Conservative
-    }
-}
 
 impl Default for PolicyConfig {
     fn default() -> Self {
