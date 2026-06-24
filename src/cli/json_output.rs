@@ -46,6 +46,14 @@ fn write_smells_json(report: &AnalysisReport, json: &mut String) -> std::fmt::Re
 
 fn write_smell_json(smell: &Smell, json: &mut String) -> std::fmt::Result {
     write!(json, "{{")?;
+    write_smell_metadata_json(smell, json)?;
+    write!(json, ",\"location\":")?;
+    write_location_json(&smell.location, json)?;
+    write_smell_text_json(smell, json)?;
+    write!(json, "}}")
+}
+
+fn write_smell_metadata_json(smell: &Smell, json: &mut String) -> std::fmt::Result {
     write_json_field(json, "code", &smell.code)?;
     write!(json, ",")?;
     write_json_field(json, "severity", severity_json(smell.severity))?;
@@ -54,14 +62,14 @@ fn write_smell_json(smell: &Smell, json: &mut String) -> std::fmt::Result {
     write!(json, ",")?;
     write_json_field(json, "category", &smell.category.to_string())?;
     write!(json, ",")?;
-    write_json_field(json, "name", &smell.name)?;
-    write!(json, ",\"location\":")?;
-    write_location_json(&smell.location, json)?;
+    write_json_field(json, "name", &smell.name)
+}
+
+fn write_smell_text_json(smell: &Smell, json: &mut String) -> std::fmt::Result {
     write!(json, ",")?;
     write_json_field(json, "message", &smell.message)?;
     write!(json, ",")?;
-    write_json_field(json, "suggestion", &smell.suggestion)?;
-    write!(json, "}}")
+    write_json_field(json, "suggestion", &smell.suggestion)
 }
 
 fn write_parse_errors_json(report: &AnalysisReport, json: &mut String) -> std::fmt::Result {

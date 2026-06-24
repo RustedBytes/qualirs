@@ -74,23 +74,23 @@ pub struct UnsafeThresholds {
 /// common Rust layouts.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PolicyConfig {
-    #[serde(default = "default_true")]
+    #[serde(default = "PolicyConfig::default_true")]
     pub skip_tests: bool,
-    #[serde(default = "default_test_path_markers")]
+    #[serde(default = "PolicyConfig::default_test_path_markers")]
     pub test_path_markers: Vec<String>,
-    #[serde(default = "default_true")]
+    #[serde(default = "PolicyConfig::default_true")]
     pub skip_examples: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "PolicyConfig::default_true")]
     pub skip_benches: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "PolicyConfig::default_true")]
     pub skip_generated: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "PolicyConfig::default_true")]
     pub skip_macro_heavy_files: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "PolicyConfig::default_true")]
     pub skip_data_carrier_structs: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "PolicyConfig::default_true")]
     pub skip_template_structs: bool,
-    #[serde(default = "default_data_carrier_struct_suffixes")]
+    #[serde(default = "PolicyConfig::default_data_carrier_struct_suffixes")]
     pub data_carrier_struct_suffixes: Vec<String>,
 }
 
@@ -469,11 +469,11 @@ pub struct Config {
     pub thresholds: Thresholds,
     #[serde(default)]
     pub policy: PolicyConfig,
-    #[serde(default = "default_exclude_paths")]
+    #[serde(default = "Config::default_exclude_paths")]
     pub exclude_paths: Vec<String>,
     #[serde(default, alias = "ignored_findings", alias = "ignore_codes")]
     pub ignore_findings: Vec<String>,
-    #[serde(default = "default_min_severity")]
+    #[serde(default = "Config::default_min_severity")]
     pub min_severity: crate::domain::smell::Severity,
     #[serde(default)]
     pub precision: Precision,
@@ -485,99 +485,39 @@ impl Default for Config {
             threads: 0,
             thresholds: Thresholds::default(),
             policy: PolicyConfig::default(),
-            exclude_paths: default_exclude_paths(),
+            exclude_paths: Self::default_exclude_paths(),
             ignore_findings: Vec::new(),
-            min_severity: default_min_severity(),
+            min_severity: Self::default_min_severity(),
             precision: Precision::default(),
         }
     }
 }
 
-fn default_exclude_paths() -> Vec<String> {
-    vec!["target".into(), ".git".into(), "node_modules".into()]
-}
-
-fn default_min_severity() -> crate::domain::smell::Severity {
-    crate::domain::smell::Severity::Info
-}
-
-
 impl Default for PolicyConfig {
     fn default() -> Self {
         Self {
             skip_tests: true,
-            test_path_markers: default_test_path_markers(),
+            test_path_markers: Self::default_test_path_markers(),
             skip_examples: true,
             skip_benches: true,
             skip_generated: true,
             skip_macro_heavy_files: true,
             skip_data_carrier_structs: true,
             skip_template_structs: true,
-            data_carrier_struct_suffixes: default_data_carrier_struct_suffixes(),
+            data_carrier_struct_suffixes: Self::default_data_carrier_struct_suffixes(),
         }
     }
 }
 
-fn default_true() -> bool {
-    true
-}
-
-fn default_test_path_markers() -> Vec<String> {
-    vec![
-        "tests".into(),
-        "test".into(),
-        "tests.rs".into(),
-        "_tests.rs".into(),
-        "fuzz".into(),
-        "fuzz_targets".into(),
-    ]
-}
-
-fn default_data_carrier_struct_suffixes() -> Vec<String> {
-    vec![
-        "Activity".into(),
-        "Command".into(),
-        "Config".into(),
-        "ConfigFile".into(),
-        "Descriptor".into(),
-        "Details".into(),
-        "Dto".into(),
-        "DTO".into(),
-        "Entry".into(),
-        "Event".into(),
-        "Failure".into(),
-        "Finding".into(),
-        "FormData".into(),
-        "Grant".into(),
-        "Hit".into(),
-        "Inspection".into(),
-        "Item".into(),
-        "Link".into(),
-        "Metrics".into(),
-        "Notification".into(),
-        "Options".into(),
-        "Outcome".into(),
-        "Overview".into(),
-        "Page".into(),
-        "Query".into(),
-        "Report".into(),
-        "Request".into(),
-        "Response".into(),
-        "Result".into(),
-        "Settings".into(),
-        "SettingsFile".into(),
-        "Session".into(),
-        "Snapshot".into(),
-        "Stats".into(),
-        "Summary".into(),
-        "Template".into(),
-        "Variant".into(),
-        "View".into(),
-        "Vulnerability".into(),
-    ]
-}
-
 impl Config {
+    fn default_exclude_paths() -> Vec<String> {
+        vec!["target".into(), ".git".into(), "node_modules".into()]
+    }
+
+    fn default_min_severity() -> crate::domain::smell::Severity {
+        crate::domain::smell::Severity::Info
+    }
+
     pub fn default_toml() -> anyhow::Result<String> {
         toml::to_string_pretty(&Self::default()).map_err(Into::into)
     }
@@ -638,4 +578,65 @@ pub(crate) fn is_rule_code(code: &str) -> bool {
     bytes.len() == 5
         && bytes[0].eq_ignore_ascii_case(&b'Q')
         && bytes[1..].iter().all(u8::is_ascii_digit)
+}
+
+impl PolicyConfig {
+    fn default_true() -> bool {
+        true
+    }
+
+    fn default_test_path_markers() -> Vec<String> {
+        vec![
+            "tests".into(),
+            "test".into(),
+            "tests.rs".into(),
+            "_tests.rs".into(),
+            "fuzz".into(),
+            "fuzz_targets".into(),
+        ]
+    }
+
+    fn default_data_carrier_struct_suffixes() -> Vec<String> {
+        vec![
+            "Activity".into(),
+            "Command".into(),
+            "Config".into(),
+            "ConfigFile".into(),
+            "Descriptor".into(),
+            "Details".into(),
+            "Dto".into(),
+            "DTO".into(),
+            "Entry".into(),
+            "Event".into(),
+            "Failure".into(),
+            "Finding".into(),
+            "FormData".into(),
+            "Grant".into(),
+            "Hit".into(),
+            "Inspection".into(),
+            "Item".into(),
+            "Link".into(),
+            "Metrics".into(),
+            "Notification".into(),
+            "Options".into(),
+            "Outcome".into(),
+            "Overview".into(),
+            "Page".into(),
+            "Query".into(),
+            "Report".into(),
+            "Request".into(),
+            "Response".into(),
+            "Result".into(),
+            "Settings".into(),
+            "SettingsFile".into(),
+            "Session".into(),
+            "Snapshot".into(),
+            "Stats".into(),
+            "Summary".into(),
+            "Template".into(),
+            "Variant".into(),
+            "View".into(),
+            "Vulnerability".into(),
+        ]
+    }
 }
