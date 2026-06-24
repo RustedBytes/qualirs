@@ -52,6 +52,7 @@ impl Detector for PublicApiExplosionDetector {
                 SmellCategory::Architecture,
                 "Public API Explosion",
                 Severity::Info,
+                                crate::domain::smell::FindingConfidence::Low,
                 SourceLocation {
                     file: file.path.clone(),
                     line_start: 1,

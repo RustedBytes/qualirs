@@ -89,6 +89,7 @@ Options:
   -c, --config <CONFIG>              Configuration file path (default: qualirs.toml in project root)
       --threads <THREADS>            Number of analysis threads to use (0 = all logical CPUs)
   -m, --min-severity <MIN_SEVERITY>  Minimum severity to report: info, warning, critical
+      --precision <PRECISION>        Precision mode: conservative, balanced, exploratory
   -t, --category <CATEGORY>          Show only smells of a specific category
   -q, --quiet                        Quiet mode: only show summary counts
       --compact                      Compact mode: show findings as a categorized list (default)
@@ -148,6 +149,7 @@ exclude_paths = [
     "node_modules",
 ]
 min_severity = "info"
+precision = "conservative"
 threads = 0
 ignore_findings = [
     # "Q0001", # God Module
@@ -199,6 +201,10 @@ unsafe_without_comment = true
 [policy]
 skip_tests = true
 test_path_markers = ["tests", "test", "tests.rs", "_tests.rs", "fuzz", "fuzz_targets"]
+skip_examples = true
+skip_benches = true
+skip_generated = true
+skip_macro_heavy_files = true
 skip_data_carrier_structs = true
 skip_template_structs = true
 data_carrier_struct_suffixes = [
@@ -243,7 +249,9 @@ data_carrier_struct_suffixes = [
 ]
 ```
 
-Policy settings control broad false-positive suppression. Set `skip_tests = false` to analyze tests with the same rules as production code. Set `skip_data_carrier_structs = false` or edit `data_carrier_struct_suffixes` if DTO/config/view structs should be checked by design detectors.
+Policy settings control broad false-positive suppression. Set `skip_tests = false`, `skip_examples = false`, or `skip_benches = false` to analyze those files with the same rules as production code. Set `skip_generated = false`, `skip_macro_heavy_files = false`, `skip_data_carrier_structs = false`, or edit `data_carrier_struct_suffixes` if those sources should be checked by design detectors.
+
+Precision controls how much heuristic signal is shown by default. `conservative` reports only high-confidence findings, `balanced` includes medium-confidence structural findings, and `exploratory` includes every detector result. Use `--precision balanced` or `--precision exploratory` to override the config for one run.
 
 Each detector emits a stable `QNNNN` code in terminal and JSON output. Add codes to `ignore_findings` to suppress every matching finding, for example `ignore_findings = ["Q0001", "Q0011"]`. Run `qualirs --list-detectors` to see the full code list.
 

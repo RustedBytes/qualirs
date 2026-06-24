@@ -41,6 +41,7 @@ impl Detector for RepeatedStringConversionDetector {
                     SmellCategory::Performance,
                     "Repeated String Conversion in Hot Path",
                     Severity::Info,
+                                        crate::domain::smell::FindingConfidence::Medium,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     format!("Repeated `.{method}()` allocation appears in a loop or iterator chain"),
                     "Keep values borrowed where possible, or delay formatting until an owned String is actually needed.",

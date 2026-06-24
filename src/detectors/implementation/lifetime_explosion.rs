@@ -85,6 +85,7 @@ fn make_smell(
         SmellCategory::Implementation,
         "Lifetime Explosion",
         Severity::Warning,
+        crate::domain::smell::FindingConfidence::Medium,
         SourceLocation {
             file: file_path.to_path_buf(),
             line_start: line,

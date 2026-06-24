@@ -26,6 +26,7 @@ impl Detector for CircularModuleDependencyDetector {
                     SmellCategory::Architecture,
                     "Circular Module Dependency",
                     Severity::Warning,
+                    crate::domain::smell::FindingConfidence::Medium,
                     SourceLocation::new(file.path.clone(), 1, 1, None),
                     format!("File references both `{a} -> {b}` and `{b} -> {a}` paths"),
                     "Break the cycle with a trait, adapter, or dependency inversion boundary.",

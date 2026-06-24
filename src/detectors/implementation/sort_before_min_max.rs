@@ -31,6 +31,7 @@ impl Detector for SortBeforeMinMaxDetector {
                     SmellCategory::Performance,
                     "Sort Before Min or Max",
                     Severity::Warning,
+                                        crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     format!("`{receiver}` is sorted before only reading `{accessor}()`"),
                     format!("Use `iter().{replacement}()` or `iter().{replacement}_by_key(...)` when the full ordering is not needed."),

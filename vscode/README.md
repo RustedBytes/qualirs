@@ -32,5 +32,6 @@ The `package:vsix` script builds `qualirs` in release mode and embeds the curren
 - `qualirs.runOnWorkspaceOpen`: check the Rust workspace when opened.
 - `qualirs.paused`: pause automatic and manual checks.
 - `qualirs.minSeverity`: override the configured minimum severity.
+- `qualirs.precision`: choose `conservative`, `balanced`, or `exploratory` finding precision.
 - `qualirs.category`: check only one qualirs category.
 - `qualirs.threads`: set analyzer threads.

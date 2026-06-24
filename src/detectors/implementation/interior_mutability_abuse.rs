@@ -30,6 +30,7 @@ impl Detector for InteriorMutabilityAbuseDetector {
                 SmellCategory::Performance,
                 "Interior Mutability Abuse",
                 Severity::Warning,
+                                crate::domain::smell::FindingConfidence::Medium,
                 SourceLocation::new(file.path.clone(), visitor.first_line, visitor.first_line, None),
                 format!("File contains {} usages of RefCell/Cell (threshold: {})", visitor.count, thresholds.r#impl.type_safety.interior_mutability_abuse),
                 "Refactor to use standard Rust mutability (`&mut T`) where possible, or rethink structural ownership.",

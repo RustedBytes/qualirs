@@ -30,6 +30,7 @@ impl Detector for FullSortForSingleElementDetector {
                     SmellCategory::Performance,
                     "Full Sort for Single Element",
                     Severity::Info,
+                                        crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     format!("`{receiver}` is fully sorted before selecting one indexed element"),
                     "Use `select_nth_unstable` when only one rank is needed and the rest of the order is irrelevant.",

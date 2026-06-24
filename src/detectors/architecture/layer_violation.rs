@@ -74,6 +74,7 @@ impl Detector for LayerViolationDetector {
                                 SmellCategory::Architecture,
                                 "Layer Violation",
                                 Severity::Critical,
+                                                                crate::domain::smell::FindingConfidence::Medium,
                                 SourceLocation {
                                     file: file.path.clone(),
                                     line_start: line,

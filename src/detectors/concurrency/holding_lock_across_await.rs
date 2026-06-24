@@ -32,6 +32,7 @@ impl Detector for HoldingLockAcrossAwaitDetector {
                     SmellCategory::Concurrency,
                     "Holding Lock Across Await",
                     Severity::Critical,
+                                        crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     "Async function appears to hold a lock across an await point",
                     "Drop the guard before awaiting or move the awaited work outside the critical section.",

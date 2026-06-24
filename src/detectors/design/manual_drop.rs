@@ -32,6 +32,7 @@ impl Detector for ManualDropDetector {
                         SmellCategory::Idiomaticity,
                         "Manual Drop",
                         Severity::Info,
+                        crate::domain::smell::FindingConfidence::Medium,
                         SourceLocation {
                             file: file.path.clone(),
                             line_start: line,

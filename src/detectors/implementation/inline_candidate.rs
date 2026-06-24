@@ -69,6 +69,7 @@ mod analysis {
                 SmellCategory::Performance,
                 "Inline Candidate",
                 inline_candidate_severity(call_sites),
+                crate::domain::smell::FindingConfidence::Low,
                 SourceLocation::new(file.path.clone(), candidate.line, candidate.line, None),
                 format!(
                     "Function `{}` is tiny and called {call_sites} times in this file",

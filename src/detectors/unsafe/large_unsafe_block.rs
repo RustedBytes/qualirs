@@ -26,6 +26,7 @@ impl Detector for LargeUnsafeBlockDetector {
                     SmellCategory::Unsafe,
                     "Large Unsafe Block",
                     Severity::Warning,
+                    crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     format!("Unsafe block spans {loc} lines"),
                     "Keep unsafe blocks as small as possible and move safe code outside.",

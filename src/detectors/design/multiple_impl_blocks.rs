@@ -39,6 +39,7 @@ impl Detector for MultipleImplBlocksDetector {
                     SmellCategory::Architecture,
                     "Multiple Impl Blocks",
                     Severity::Info,
+                                        crate::domain::smell::FindingConfidence::Low,
                     SourceLocation::new(file.path.clone(), first_line, first_line, None),
                     format!("Struct `{}` has {} inherent `impl` blocks in this file", type_name, lines.len()),
                     "Consolidate inherent `impl` blocks for the same type into a single block to improve readability.",

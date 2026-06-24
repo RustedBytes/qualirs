@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use qualirs::analysis::engine::Engine;
-use qualirs::domain::config::{Config, PolicyConfig};
+use qualirs::domain::config::{Config, PolicyConfig, Precision};
 use qualirs::domain::smell::{RULES, rule_code_for};
 
 const CASES_DIR: &str = "tests/cases";
@@ -32,6 +32,7 @@ fn showcase_cases_emit_expected_findings() {
         copy_dir(&case_dir, &analysis_root);
 
         let mut engine = Engine::new(Config {
+            precision: Precision::Exploratory,
             policy: PolicyConfig {
                 skip_tests: false,
                 ..PolicyConfig::default()

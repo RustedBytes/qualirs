@@ -26,6 +26,7 @@ impl Detector for DroppedJoinHandleDetector {
                     SmellCategory::Concurrency,
                     "Dropped JoinHandle",
                     Severity::Warning,
+                    crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     "Spawned task handle is assigned to `_` and immediately dropped",
                     "Keep the JoinHandle and await, abort, or document intentional detachment.",

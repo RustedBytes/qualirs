@@ -26,6 +26,7 @@ impl Detector for ManualOptionResultMappingDetector {
                     SmellCategory::Idiomaticity,
                     "Manual Option/Result Mapping",
                     Severity::Info,
+                                        crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     "Match expression manually maps Option or Result variants",
                     "Use map, map_err, and_then, or the ? operator where it keeps the code clearer.",

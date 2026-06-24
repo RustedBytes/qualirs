@@ -34,6 +34,7 @@ impl Detector for CloneBeforeMoveIntoCollectionDetector {
                         SmellCategory::Performance,
                         "Clone Before Move Into Collection",
                         Severity::Info,
+                                                crate::domain::smell::FindingConfidence::High,
                         SourceLocation::new(file.path.clone(), line, line, None),
                         format!("`{name}` is cloned into a collection and is not used afterwards"),
                         "Move the value into the collection directly when the original binding is no longer needed.",

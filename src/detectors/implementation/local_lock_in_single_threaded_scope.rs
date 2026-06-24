@@ -31,6 +31,7 @@ impl Detector for LocalLockInSingleThreadedScopeDetector {
                     SmellCategory::Performance,
                     "Local Lock in Single-Threaded Scope",
                     Severity::Info,
+                                        crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     format!("Local `{kind}` binding `{name}` is locked without evidence of sharing"),
                     "Use plain mutable state for single-threaded code, or RefCell/Cell if interior mutability is specifically needed.",

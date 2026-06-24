@@ -38,6 +38,7 @@ impl Detector for MissingCollectionPreallocationDetector {
                     SmellCategory::Performance,
                     "Missing Collection Preallocation",
                     Severity::Warning,
+                                        crate::domain::smell::FindingConfidence::Medium,
                     SourceLocation::new(file.path.clone(), finding.line, finding.line, None),
                     format!(
                         "`{}` is created with `{}::new()` and repeatedly grown in a loop",

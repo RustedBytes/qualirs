@@ -53,6 +53,7 @@ fn check_function(
             } else {
                 Severity::Warning
             },
+            crate::domain::smell::FindingConfidence::Medium,
             SourceLocation {
                 file: file_path.to_path_buf(),
                 line_start: start_line,

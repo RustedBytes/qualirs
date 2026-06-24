@@ -47,6 +47,7 @@ fn smell(file: &SourceFile, line: usize, name: &str) -> Smell {
         SmellCategory::Unsafe,
         "FFI Type Not repr(C)",
         Severity::Warning,
+        crate::domain::smell::FindingConfidence::High,
         SourceLocation::new(file.path.clone(), line, line, None),
         format!("FFI-facing type `{name}` lacks #[repr(C)]"),
         "Add #[repr(C)] or avoid exposing the type across an FFI boundary.",

@@ -37,6 +37,7 @@ impl Detector for UnnecessaryAllocationInLoopDetector {
                     SmellCategory::Performance,
                     "Unnecessary Allocation in Loop",
                     Severity::Info,
+                    crate::domain::smell::FindingConfidence::Medium,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     format!("Allocation-like call `{call}` appears inside a loop"),
                     "Move reusable allocation outside the loop or borrow data where possible.",

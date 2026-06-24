@@ -37,6 +37,7 @@ impl Detector for GodModuleDetector {
                 SmellCategory::Architecture,
                 "God Module",
                 Severity::Warning,
+                crate::domain::smell::FindingConfidence::Medium,
                 SourceLocation {
                     file: file.path.clone(),
                     line_start: 1,
@@ -56,6 +57,7 @@ impl Detector for GodModuleDetector {
                 SmellCategory::Architecture,
                 "God Module (items)",
                 Severity::Warning,
+                crate::domain::smell::FindingConfidence::Medium,
                 SourceLocation {
                     file: file.path.clone(),
                     line_start: 1,

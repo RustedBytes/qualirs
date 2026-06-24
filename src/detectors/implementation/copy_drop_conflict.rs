@@ -43,6 +43,7 @@ fn conflict_smell(file: &SourceFile, copy_type: &TypeInfo<'_>) -> Smell {
         SmellCategory::Idiomaticity,
         "Copy + Drop Conflict",
         Severity::Critical,
+        crate::domain::smell::FindingConfidence::High,
         SourceLocation {
             file: file.path.clone(),
             line_start: line,

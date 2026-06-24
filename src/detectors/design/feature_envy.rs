@@ -69,6 +69,7 @@ impl Detector for FeatureEnvyDetector {
                         SmellCategory::Design,
                         "Feature Envy",
                         Severity::Info,
+                                                crate::domain::smell::FindingConfidence::Low,
                         SourceLocation {
                             file: file.path.clone(),
                             line_start: start,

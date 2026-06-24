@@ -26,6 +26,7 @@ impl Detector for LargeErrorEnumDetector {
                         SmellCategory::Design,
                         "Large Error Enum",
                         Severity::Warning,
+                                                crate::domain::smell::FindingConfidence::Medium,
                         SourceLocation::new(file.path.clone(), line, line, None),
                         format!(
                             "Error enum `{}` has {} variants (threshold: {})",

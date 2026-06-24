@@ -38,6 +38,7 @@ impl Detector for UnstableDependencyDetector {
                     SmellCategory::Architecture,
                     "Unstable Dependency",
                     Severity::Warning,
+                    crate::domain::smell::FindingConfidence::Medium,
                     SourceLocation {
                         file: file.path.clone(),
                         line_start: line,

@@ -42,6 +42,7 @@ impl Detector for LongMethodChainDetector {
                             SmellCategory::Implementation,
                             "Long Method Chain",
                             Severity::Info,
+                            crate::domain::smell::FindingConfidence::Medium,
                             SourceLocation {
                                 file: file.path.clone(),
                                 line_start: line,

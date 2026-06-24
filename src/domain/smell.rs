@@ -70,6 +70,30 @@ impl fmt::Display for Severity {
     }
 }
 
+/// How confident QualiRS is that a finding should be user-visible by default.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum FindingConfidence {
+    #[serde(alias = "Low")]
+    Low,
+    #[serde(alias = "Medium")]
+    Medium,
+    #[serde(alias = "High")]
+    High,
+}
+
+impl fmt::Display for FindingConfidence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Low => write!(f, "low"),
+            Self::Medium => write!(f, "medium"),
+            Self::High => write!(f, "high"),
+        }
+    }
+}
+
 /// Location in source code where a smell was detected.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceLocation {
@@ -104,6 +128,7 @@ pub struct Smell {
     pub category: SmellCategory,
     pub name: String,
     pub severity: Severity,
+    pub confidence: FindingConfidence,
     pub location: SourceLocation,
     pub message: String,
     pub suggestion: String,
@@ -114,6 +139,7 @@ impl Smell {
         category: SmellCategory,
         name: impl Into<String>,
         severity: Severity,
+        confidence: FindingConfidence,
         location: SourceLocation,
         message: impl Into<String>,
         suggestion: impl Into<String>,
@@ -126,6 +152,7 @@ impl Smell {
             category,
             name,
             severity,
+            confidence,
             location,
             message: message.into(),
             suggestion: suggestion.into(),
@@ -322,6 +349,7 @@ mod tests {
             SmellCategory::Architecture,
             "God Module (items)",
             Severity::Warning,
+            FindingConfidence::High,
             SourceLocation::new(PathBuf::from("src/lib.rs"), 1, 1, None),
             "message",
             "suggestion",

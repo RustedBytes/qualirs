@@ -25,6 +25,7 @@ impl Detector for UnsafeFnMissingSafetyDocsDetector {
                     SmellCategory::Unsafe,
                     "Unsafe Fn Missing Safety Docs",
                     Severity::Warning,
+                    crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     format!(
                         "Public unsafe function `{}` lacks a # Safety docs section",

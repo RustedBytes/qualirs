@@ -35,6 +35,7 @@ impl Detector for RepeatedRegexConstructionDetector {
                     } else {
                         Severity::Info
                     },
+                    crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     "Regex is constructed at runtime".to_string(),
                     "Store regexes in LazyLock, OnceLock, or lazy_static when they are reused.",

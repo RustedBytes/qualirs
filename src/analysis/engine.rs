@@ -345,10 +345,20 @@ impl Engine {
         let (all_smells, errors) = files
             .par_iter()
             .filter(|file_path| {
-                !crate::detectors::policy::is_test_path_with_policy(file_path, &self.config.policy)
+                !crate::detectors::policy::is_skipped_path_with_policy(
+                    file_path,
+                    &self.config.policy,
+                )
             })
             .map(|file_path| match SourceFile::from_path(file_path.clone()) {
                 Ok(source) => {
+                    if crate::detectors::policy::is_skipped_source_with_policy(
+                        &source,
+                        &self.config.policy,
+                    ) {
+                        return (Vec::new(), Vec::new());
+                    }
+
                     let mut smells = Vec::new();
                     for detector in &self.detectors {
                         smells.extend(detector.detect(&source));
@@ -390,6 +400,7 @@ fn should_report_smell(
     smell: &Smell,
 ) -> bool {
     smell.severity >= config.min_severity
+        && config.precision.includes(smell.confidence)
         && !ignored_findings.iter().any(|code| code == &smell.code)
         && !has_pre_line_ignore(source, smell)
 }
@@ -523,7 +534,8 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
 
-    use crate::domain::smell::{SmellCategory, SourceLocation};
+    use crate::domain::config::Precision;
+    use crate::domain::smell::{FindingConfidence, SmellCategory, SourceLocation};
 
     use super::*;
 
@@ -539,6 +551,7 @@ mod tests {
             SmellCategory::Architecture,
             "God Module (items)",
             Severity::Warning,
+            crate::domain::smell::FindingConfidence::High,
             SourceLocation::new(PathBuf::from("src/lib.rs"), 1, 1, None),
             "message",
             "suggestion",
@@ -569,6 +582,7 @@ mod tests {
             SmellCategory::Implementation,
             "Too Many Arguments",
             Severity::Warning,
+            crate::domain::smell::FindingConfidence::High,
             SourceLocation::new(PathBuf::from("src/lib.rs"), 2, 2, None),
             "message",
             "suggestion",
@@ -593,6 +607,7 @@ mod tests {
             SmellCategory::Implementation,
             "Too Many Arguments",
             Severity::Warning,
+            crate::domain::smell::FindingConfidence::High,
             SourceLocation::new(PathBuf::from("src/lib.rs"), 2, 2, None),
             "message",
             "suggestion",
@@ -614,6 +629,7 @@ mod tests {
             SmellCategory::Implementation,
             "Too Many Arguments",
             Severity::Warning,
+            crate::domain::smell::FindingConfidence::High,
             SourceLocation::new(PathBuf::from("src/lib.rs"), 2, 2, None),
             "message",
             "suggestion",
@@ -637,6 +653,7 @@ mod tests {
         .expect("write source");
 
         let strict_config = Config {
+            precision: Precision::Balanced,
             thresholds: crate::domain::config::Thresholds {
                 r#impl: crate::domain::config::ImplThresholds {
                     control_flow: crate::domain::config::ControlFlowThresholds {
@@ -668,6 +685,7 @@ mod tests {
         .expect("write source");
 
         let strict_config = Config {
+            precision: Precision::Balanced,
             thresholds: crate::domain::config::Thresholds {
                 r#impl: crate::domain::config::ImplThresholds {
                     control_flow: crate::domain::config::ControlFlowThresholds {
@@ -693,6 +711,7 @@ mod tests {
         );
 
         let lenient_config = Config {
+            precision: Precision::Balanced,
             thresholds: crate::domain::config::Thresholds {
                 r#impl: crate::domain::config::ImplThresholds {
                     control_flow: crate::domain::config::ControlFlowThresholds {
@@ -711,6 +730,78 @@ mod tests {
         ));
         let lenient_report = lenient_engine.analyze(dir.path());
         assert_eq!(lenient_report.total_smells(), 0);
+    }
+
+    #[test]
+    fn precision_filters_by_finding_confidence() {
+        let config = Config::default();
+        let ignored_findings = Vec::new();
+        let source =
+            SourceFile::from_source(PathBuf::from("src/lib.rs"), String::from("fn main() {}\n"))
+                .expect("parse source");
+
+        let high = test_smell("Unused Result Ignored", FindingConfidence::High);
+        let medium = test_smell("Too Many Arguments", FindingConfidence::Medium);
+        let low = test_smell("Magic Numbers", FindingConfidence::Low);
+
+        assert!(should_report_smell(
+            &config,
+            &ignored_findings,
+            &source,
+            &high
+        ));
+        assert!(!should_report_smell(
+            &config,
+            &ignored_findings,
+            &source,
+            &medium
+        ));
+        assert!(!should_report_smell(
+            &config,
+            &ignored_findings,
+            &source,
+            &low
+        ));
+
+        let balanced = Config {
+            precision: Precision::Balanced,
+            ..Config::default()
+        };
+        assert!(should_report_smell(
+            &balanced,
+            &ignored_findings,
+            &source,
+            &medium
+        ));
+        assert!(!should_report_smell(
+            &balanced,
+            &ignored_findings,
+            &source,
+            &low
+        ));
+
+        let exploratory = Config {
+            precision: Precision::Exploratory,
+            ..Config::default()
+        };
+        assert!(should_report_smell(
+            &exploratory,
+            &ignored_findings,
+            &source,
+            &low
+        ));
+    }
+
+    fn test_smell(name: &str, confidence: FindingConfidence) -> Smell {
+        Smell::new(
+            SmellCategory::Implementation,
+            name,
+            Severity::Warning,
+            confidence,
+            SourceLocation::new(PathBuf::from("src/lib.rs"), 1, 1, None),
+            "message",
+            "suggestion",
+        )
     }
 
     #[test]

@@ -59,6 +59,7 @@ impl Detector for AnemicStructDetector {
                     SmellCategory::Design,
                     "Anemic Struct",
                     Severity::Info,
+                                        crate::domain::smell::FindingConfidence::Low,
                     SourceLocation {
                         file: file.path.clone(),
                         line_start: line,

@@ -110,6 +110,7 @@ impl Detector for BrokenConstructorDetector {
                     SmellCategory::Design,
                     "Broken Constructor",
                     Severity::Warning,
+                    crate::domain::smell::FindingConfidence::Low,
                     SourceLocation {
                         file: file.path.clone(),
                         line_start: s.id.line,

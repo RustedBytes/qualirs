@@ -42,6 +42,7 @@ impl Detector for BooleanFlagArgumentDetector {
                         SmellCategory::Design,
                         "Boolean Flag Argument",
                         Severity::Info,
+                                                crate::domain::smell::FindingConfidence::Medium,
                         SourceLocation::new(file.path.clone(), line, line, None),
                         format!(
                             "Function `{}` takes boolean flag argument(s): {}",

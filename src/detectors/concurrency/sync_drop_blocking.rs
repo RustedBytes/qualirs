@@ -46,6 +46,7 @@ impl Detector for SyncDropBlockingDetector {
                                                     SmellCategory::Concurrency,
                                                     "Sync Drop Blocking (Async Hazard)",
                                                     Severity::Critical,
+                                                                                                        crate::domain::smell::FindingConfidence::High,
                                                     SourceLocation::new(file.path.clone(), line, line, None),
                                                     format!(
                                                         "`Drop` impl for `{}` calls potentially blocking method `{}`", type_name, method

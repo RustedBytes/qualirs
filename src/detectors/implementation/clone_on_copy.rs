@@ -27,6 +27,7 @@ impl Detector for CloneOnCopyDetector {
                     SmellCategory::Performance,
                     "Clone on Copy",
                     Severity::Info,
+                    crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     format!("Value `{name}` appears to be Copy but is cloned"),
                     "Use the value directly instead of calling clone().",

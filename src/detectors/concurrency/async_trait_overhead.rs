@@ -30,6 +30,7 @@ impl Detector for AsyncTraitOverheadDetector {
                 SmellCategory::Performance,
                 "Async Trait Overhead",
                 Severity::Info,
+                crate::domain::smell::FindingConfidence::Low,
                 SourceLocation::new(file.path.clone(), line, line, None),
                 "Usage of `#[async_trait]` macro incurs unnecessary Future boxing overhead"
                     .to_string(),

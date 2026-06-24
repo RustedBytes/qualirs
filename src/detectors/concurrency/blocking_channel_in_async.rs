@@ -27,6 +27,7 @@ impl Detector for BlockingChannelInAsyncDetector {
                     SmellCategory::Concurrency,
                     "Blocking Channel in Async",
                     Severity::Warning,
+                    crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     "Blocking channel operation appears inside an async function",
                     "Use async channels or spawn blocking work explicitly.",

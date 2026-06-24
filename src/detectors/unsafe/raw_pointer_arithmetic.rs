@@ -27,6 +27,7 @@ impl Detector for RawPointerArithmeticDetector {
                 SmellCategory::Unsafe,
                 "Raw Pointer Arithmetic",
                 Severity::Warning,
+                crate::domain::smell::FindingConfidence::High,
                 SourceLocation {
                     file: file.path.clone(),
                     line_start: *line,

@@ -26,6 +26,7 @@ impl Detector for ManualFindLoopDetector {
                     SmellCategory::Idiomaticity,
                     "Manual Find/Any Loop",
                     Severity::Info,
+                    crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     "Loop returns early based on a predicate",
                     "Consider iterator adapters such as find, any, all, or position.",

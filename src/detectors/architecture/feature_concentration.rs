@@ -27,6 +27,7 @@ impl Detector for FeatureConcentrationDetector {
                 SmellCategory::Architecture,
                 "Feature Concentration",
                 Severity::Warning,
+                crate::domain::smell::FindingConfidence::Low,
                 SourceLocation {
                     file: file.path.clone(),
                     line_start: 1,

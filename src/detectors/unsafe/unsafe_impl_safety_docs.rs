@@ -31,6 +31,7 @@ impl Detector for UnsafeImplSafetyDocsDetector {
                             SmellCategory::Unsafe,
                             "Unsafe Impl Missing Safety Docs",
                             Severity::Critical,
+                                                        crate::domain::smell::FindingConfidence::High,
                             SourceLocation::new(file.path.clone(), line, line, None),
                             format!("Unsafe `{trait_name}` impl lacks a safety explanation"),
                             "Add a SAFETY comment explaining why the impl upholds Send/Sync invariants.",

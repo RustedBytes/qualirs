@@ -27,6 +27,7 @@ impl Detector for StdMutexInAsyncDetector {
                     SmellCategory::Concurrency,
                     "Std Mutex in Async",
                     Severity::Warning,
+                                        crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     "std::sync locking primitive appears inside an async function",
                     "Use tokio::sync/async-aware primitives or ensure the lock cannot block an executor thread.",

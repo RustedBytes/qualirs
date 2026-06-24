@@ -26,6 +26,7 @@ impl Detector for NeedlessIntermediateStringFormattingDetector {
                     SmellCategory::Performance,
                     "Needless Intermediate String Formatting",
                     Severity::Info,
+                                        crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     "`push_str(&format!(...))` allocates a temporary String",
                     "Use `write!`/`writeln!` with `std::fmt::Write` to append formatted data directly.",

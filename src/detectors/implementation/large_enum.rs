@@ -24,6 +24,7 @@ impl Detector for LargeEnumDetector {
                         SmellCategory::Implementation,
                         "Large Enum",
                         Severity::Warning,
+                        crate::domain::smell::FindingConfidence::Medium,
                         SourceLocation {
                             file: file.path.clone(),
                             line_start: line,

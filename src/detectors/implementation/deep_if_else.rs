@@ -53,6 +53,7 @@ fn if_depth_smell(
         SmellCategory::Implementation,
         "Deep If/Else Nesting",
         Severity::Warning,
+        crate::domain::smell::FindingConfidence::Medium,
         SourceLocation {
             file: file.path.clone(),
             line_start: line,

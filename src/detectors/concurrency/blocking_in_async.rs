@@ -40,6 +40,7 @@ impl Detector for BlockingInAsyncDetector {
                         SmellCategory::Concurrency,
                         "Blocking in Async",
                         Severity::Warning,
+                        crate::domain::smell::FindingConfidence::High,
                         SourceLocation {
                             file: file.path.clone(),
                             line_start: start,

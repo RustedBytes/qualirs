@@ -27,6 +27,7 @@ impl Detector for NeedlessDynamicDispatchDetector {
                     SmellCategory::Performance,
                     "Needless Dynamic Dispatch",
                     Severity::Info,
+                                        crate::domain::smell::FindingConfidence::Low,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     format!("Local binding `{name}` uses `dyn Trait` dispatch"),
                     "Use a concrete type or a generic parameter when this local code does not require heterogeneous values.",

@@ -32,6 +32,7 @@ impl Detector for ArcMutexOveruseDetector {
                 SmellCategory::Performance,
                 "Arc Mutex Overuse",
                 Severity::Warning,
+                crate::domain::smell::FindingConfidence::Medium,
                 SourceLocation {
                     file: file.path.clone(),
                     line_start: line,

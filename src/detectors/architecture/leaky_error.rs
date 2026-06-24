@@ -46,6 +46,7 @@ impl Detector for LeakyErrorAbstractionDetector {
                                                 SmellCategory::Architecture,
                                                 "Leaky Error Abstraction",
                                                 Severity::Warning,
+                                                                                                crate::domain::smell::FindingConfidence::Medium,
                                                 SourceLocation::new(file.path.clone(), start_line, start_line, None),
                                                 format!(
                                                     "Public enum `{}` contains variant `{}` wrapping `{}`",

@@ -58,6 +58,7 @@ impl Detector for PrimitiveObsessionDetector {
                             SmellCategory::Design,
                             "Primitive Obsession",
                             Severity::Info,
+                                                        crate::domain::smell::FindingConfidence::Low,
                             SourceLocation::new(file.path.clone(), start_line, start_line, None),
                             format!(
                                 "Struct `{}` has {} fields, and all of them are primitive types (threshold: {})",

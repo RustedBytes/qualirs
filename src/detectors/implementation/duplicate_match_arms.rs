@@ -27,6 +27,7 @@ impl Detector for DuplicateMatchArmsDetector {
                     SmellCategory::Implementation,
                     "Duplicate Match Arms",
                     Severity::Info,
+                    crate::domain::smell::FindingConfidence::Medium,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     "Match expression has duplicate arm bodies",
                     "Combine equivalent arms with `|` patterns or extract the repeated body.",

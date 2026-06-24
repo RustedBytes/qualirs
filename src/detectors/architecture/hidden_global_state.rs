@@ -40,6 +40,7 @@ impl Detector for HiddenGlobalStateDetector {
                 SmellCategory::Architecture,
                 "Hidden Global State",
                 Severity::Warning,
+                                crate::domain::smell::FindingConfidence::Medium,
                 SourceLocation::new(file.path.clone(), first_line, first_line, None),
                 format!("File contains {} global state objects/macros (threshold: {})", globals.len(), thresholds.arch.hidden_global_state),
                 "Refactor to pass state explicitly (Dependency Injection) rather than using globals.",

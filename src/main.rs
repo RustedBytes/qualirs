@@ -9,7 +9,7 @@ use std::process::ExitCode;
 
 use analysis::engine::{AnalysisReport, Engine};
 use cli::args::{Args, Command, OutputFormat};
-use domain::config::Config;
+use domain::config::{Config, Precision};
 use domain::smell::{Severity, SmellCategory};
 use infrastructure::source::{
     GitReference, SourceRequest, prepare_source, prepare_source_in, prepare_source_with_options,
@@ -117,6 +117,10 @@ fn get_config(args: &Args, analysis_path: &Path) -> anyhow::Result<Config> {
         };
     }
 
+    if let Some(precision) = &filters.precision {
+        config.precision = precision.parse::<Precision>().map_err(anyhow::Error::msg)?;
+    }
+
     if let Some(threads) = filters.threads {
         config.threads = threads;
     }
@@ -219,6 +223,7 @@ mod tests {
                 config: Some(config),
                 threads: None,
                 min_severity,
+                precision: None,
                 category: None,
             },
             output_options: OutputOptions {
@@ -272,5 +277,43 @@ mod tests {
         let config = get_config(&args, dir.path()).expect("load config");
 
         assert_eq!(config.threads, 4);
+    }
+
+    #[test]
+    fn config_precision_is_used_when_cli_flag_is_absent() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let config_path = dir.path().join("qualirs.toml");
+        std::fs::write(&config_path, "precision = \"balanced\"\n").expect("write config");
+
+        let config =
+            get_config(&args_with_config(config_path, None), dir.path()).expect("load config");
+
+        assert_eq!(config.precision, Precision::Balanced);
+    }
+
+    #[test]
+    fn cli_precision_overrides_config_value() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let config_path = dir.path().join("qualirs.toml");
+        std::fs::write(&config_path, "precision = \"balanced\"\n").expect("write config");
+        let mut args = args_with_config(config_path, None);
+        args.filters.precision = Some("exploratory".into());
+
+        let config = get_config(&args, dir.path()).expect("load config");
+
+        assert_eq!(config.precision, Precision::Exploratory);
+    }
+
+    #[test]
+    fn cli_rejects_malformed_precision() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let config_path = dir.path().join("qualirs.toml");
+        std::fs::write(&config_path, "").expect("write config");
+        let mut args = args_with_config(config_path, None);
+        args.filters.precision = Some("strict".into());
+
+        let err = get_config(&args, dir.path()).expect_err("invalid precision");
+
+        assert!(err.to_string().contains("Unknown precision"));
     }
 }

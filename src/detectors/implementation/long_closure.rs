@@ -32,6 +32,7 @@ impl Detector for LongClosureDetector {
                     SmellCategory::Implementation,
                     "Long Closure",
                     Severity::Info,
+                    crate::domain::smell::FindingConfidence::Medium,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     format!("Closure spans {loc} lines (threshold: {threshold})"),
                     "Extract complex closure bodies into named functions.",

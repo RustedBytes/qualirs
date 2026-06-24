@@ -39,6 +39,7 @@ impl Detector for CyclicDependencyDetector {
                 SmellCategory::Architecture,
                 "Cyclic Crate Dependency",
                 Severity::Critical,
+                crate::domain::smell::FindingConfidence::Medium,
                 SourceLocation {
                     file: file.path.clone(),
                     line_start: 1,
@@ -67,6 +68,7 @@ impl Detector for CyclicDependencyDetector {
                 SmellCategory::Architecture,
                 "Cyclic Crate Dependency",
                 Severity::Warning,
+                                crate::domain::smell::FindingConfidence::Medium,
                 SourceLocation {
                     file: file.path.clone(),
                     line_start: 1,

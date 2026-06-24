@@ -30,6 +30,7 @@ impl Detector for DuplicateDependencyVersionsDetector {
                     SmellCategory::Architecture,
                     "Duplicate Dependency Versions",
                     Severity::Info,
+                    crate::domain::smell::FindingConfidence::Medium,
                     SourceLocation::new(file.path.clone(), 1, 1, None),
                     format!("Cargo.lock contains multiple versions of `{name}`"),
                     "Align dependency version requirements to reduce duplicate builds.",

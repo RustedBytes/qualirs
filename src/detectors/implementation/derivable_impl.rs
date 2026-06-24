@@ -81,6 +81,7 @@ fn derivable_impl_smell(file: &SourceFile, trait_ident: &syn::Ident, line: usize
         SmellCategory::Idiomaticity,
         "Derivable Impl",
         Severity::Info,
+        crate::domain::smell::FindingConfidence::High,
         SourceLocation::new(file.path.clone(), line, line, None),
         format!("Manual `{trait_ident}` impl may be derivable"),
         "Prefer #[derive(...)] when the implementation is mechanical.",

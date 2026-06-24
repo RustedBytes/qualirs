@@ -87,6 +87,10 @@ pub(crate) struct FilterOptions {
     #[arg(short = 'm', long)]
     pub(crate) min_severity: Option<String>,
 
+    /// Precision mode: conservative, balanced, exploratory
+    #[arg(long)]
+    pub(crate) precision: Option<String>,
+
     /// Show only smells of a specific category
     #[arg(short = 't', long)]
     pub(crate) category: Option<String>,

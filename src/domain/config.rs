@@ -1,5 +1,7 @@
 use std::sync::{OnceLock, RwLock};
 
+use crate::domain::smell::FindingConfidence;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct ArchThresholds {
     pub god_module_loc: usize,
@@ -77,11 +79,66 @@ pub struct PolicyConfig {
     #[serde(default = "default_test_path_markers")]
     pub test_path_markers: Vec<String>,
     #[serde(default = "default_true")]
+    pub skip_examples: bool,
+    #[serde(default = "default_true")]
+    pub skip_benches: bool,
+    #[serde(default = "default_true")]
+    pub skip_generated: bool,
+    #[serde(default = "default_true")]
+    pub skip_macro_heavy_files: bool,
+    #[serde(default = "default_true")]
     pub skip_data_carrier_structs: bool,
     #[serde(default = "default_true")]
     pub skip_template_structs: bool,
     #[serde(default = "default_data_carrier_struct_suffixes")]
     pub data_carrier_struct_suffixes: Vec<String>,
+}
+
+/// User-facing precision mode for deciding which confidence levels are reported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Precision {
+    #[serde(alias = "Conservative")]
+    Conservative,
+    #[serde(alias = "Balanced")]
+    Balanced,
+    #[serde(alias = "Exploratory")]
+    Exploratory,
+}
+
+impl Precision {
+    pub(crate) fn includes(self, confidence: FindingConfidence) -> bool {
+        match self {
+            Self::Conservative => confidence == FindingConfidence::High,
+            Self::Balanced => confidence >= FindingConfidence::Medium,
+            Self::Exploratory => true,
+        }
+    }
+}
+
+impl std::fmt::Display for Precision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Conservative => write!(f, "conservative"),
+            Self::Balanced => write!(f, "balanced"),
+            Self::Exploratory => write!(f, "exploratory"),
+        }
+    }
+}
+
+impl std::str::FromStr for Precision {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_lowercase().as_str() {
+            "conservative" => Ok(Self::Conservative),
+            "balanced" => Ok(Self::Balanced),
+            "exploratory" => Ok(Self::Exploratory),
+            other => Err(format!(
+                "Unknown precision: {other}. Use: conservative, balanced, exploratory"
+            )),
+        }
+    }
 }
 
 /// Thresholds that control when a smell is reported.
@@ -146,6 +203,7 @@ mod tests {
                 .interior_mutability_abuse,
             5
         );
+        assert_eq!(config.precision, Precision::Conservative);
 
         // Arch
         assert_eq!(config.thresholds.arch.hidden_global_state, 3);
@@ -158,6 +216,10 @@ mod tests {
 
         // Policy
         assert!(config.policy.skip_tests);
+        assert!(config.policy.skip_examples);
+        assert!(config.policy.skip_benches);
+        assert!(config.policy.skip_generated);
+        assert!(config.policy.skip_macro_heavy_files);
         assert!(config.policy.skip_data_carrier_structs);
         assert!(config.policy.skip_template_structs);
         assert_eq!(config.threads, 0);
@@ -185,13 +247,53 @@ mod tests {
         assert!(toml.contains("min_severity = \"info\""));
         assert!(toml.contains("threads = 0"));
         assert_eq!(config.min_severity, crate::domain::smell::Severity::Info);
+        assert_eq!(config.precision, Precision::Conservative);
         assert_eq!(config.threads, 0);
         assert_eq!(config.thresholds.arch.god_module_loc, 1000);
         assert!(config.exclude_paths.iter().any(|path| path == "target"));
         assert!(config.ignore_findings.is_empty());
         assert!(toml.contains("ignore_findings = []"));
+        assert!(toml.contains("precision = \"conservative\""));
         assert!(toml.contains("[policy]"));
         assert!(toml.contains("skip_tests = true"));
+        assert!(toml.contains("skip_examples = true"));
+        assert!(toml.contains("skip_benches = true"));
+        assert!(toml.contains("skip_generated = true"));
+        assert!(toml.contains("skip_macro_heavy_files = true"));
+    }
+
+    #[test]
+    fn config_accepts_precision_modes() {
+        let config: Config = toml::from_str(
+            r#"
+precision = "balanced"
+"#,
+        )
+        .expect("parse balanced precision");
+
+        assert_eq!(config.precision, Precision::Balanced);
+        assert!(config.validate().is_ok());
+
+        let config: Config = toml::from_str(
+            r#"
+precision = "Exploratory"
+"#,
+        )
+        .expect("parse title-case exploratory precision");
+
+        assert_eq!(config.precision, Precision::Exploratory);
+    }
+
+    #[test]
+    fn config_rejects_malformed_precision() {
+        let err = toml::from_str::<Config>(
+            r#"
+precision = "strict"
+"#,
+        )
+        .expect_err("invalid precision should fail to parse");
+
+        assert!(err.to_string().contains("precision"));
     }
 
     #[test]
@@ -205,6 +307,7 @@ skip_tests = false
         .expect("parse partial policy config");
 
         assert!(!config.policy.skip_tests);
+        assert!(config.policy.skip_examples);
         assert!(config.policy.skip_data_carrier_structs);
         assert!(
             config
@@ -370,6 +473,8 @@ pub struct Config {
     pub ignore_findings: Vec<String>,
     #[serde(default = "default_min_severity")]
     pub min_severity: crate::domain::smell::Severity,
+    #[serde(default)]
+    pub precision: Precision,
 }
 
 impl Default for Config {
@@ -381,6 +486,7 @@ impl Default for Config {
             exclude_paths: default_exclude_paths(),
             ignore_findings: Vec::new(),
             min_severity: default_min_severity(),
+            precision: Precision::default(),
         }
     }
 }
@@ -393,11 +499,21 @@ fn default_min_severity() -> crate::domain::smell::Severity {
     crate::domain::smell::Severity::Info
 }
 
+impl Default for Precision {
+    fn default() -> Self {
+        Self::Conservative
+    }
+}
+
 impl Default for PolicyConfig {
     fn default() -> Self {
         Self {
             skip_tests: true,
             test_path_markers: default_test_path_markers(),
+            skip_examples: true,
+            skip_benches: true,
+            skip_generated: true,
+            skip_macro_heavy_files: true,
             skip_data_carrier_structs: true,
             skip_template_structs: true,
             data_carrier_struct_suffixes: default_data_carrier_struct_suffixes(),

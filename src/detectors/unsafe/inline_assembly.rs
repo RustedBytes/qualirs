@@ -26,6 +26,7 @@ impl Detector for InlineAssemblyDetector {
                 SmellCategory::Unsafe,
                 "Inline Assembly",
                 Severity::Warning,
+                                crate::domain::smell::FindingConfidence::High,
                 SourceLocation::new(file.path.clone(), line, line, None),
                 format!("Use of highly-platform specific `{}` macro", macro_name),
                 "Abstract inline assembly behind a safe, cross-platform interface or use compiler intrinsics if possible.",

@@ -5,6 +5,7 @@ exclude_paths = [
 ]
 ignore_findings = []
 min_severity = "info"
+precision = "conservative"
 threads = 0
 
 [thresholds.arch]
@@ -60,6 +61,10 @@ test_path_markers = [
     "fuzz",
     "fuzz_targets",
 ]
+skip_examples = true
+skip_benches = true
+skip_generated = true
+skip_macro_heavy_files = true
 skip_data_carrier_structs = true
 skip_template_structs = true
 data_carrier_struct_suffixes = [

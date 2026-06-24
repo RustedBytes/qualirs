@@ -39,6 +39,7 @@ impl Detector for DeadlockRiskDetector {
                         SmellCategory::Concurrency,
                         "Deadlock Risk",
                         Severity::Critical,
+                                                crate::domain::smell::FindingConfidence::Medium,
                         SourceLocation {
                             file: file.path.clone(),
                             line_start: start,

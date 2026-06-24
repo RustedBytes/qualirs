@@ -27,6 +27,7 @@ impl Detector for LargeValuePassedByValueDetector {
                             SmellCategory::Performance,
                             "Large Value Passed By Value",
                             Severity::Info,
+                            crate::domain::smell::FindingConfidence::Medium,
                             SourceLocation::new(file.path.clone(), line, line, None),
                             format!(
                                 "Function `{}` takes a potentially large value by value",

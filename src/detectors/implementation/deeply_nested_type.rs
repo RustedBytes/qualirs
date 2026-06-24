@@ -52,6 +52,7 @@ fn nested_type_smell(
         SmellCategory::Implementation,
         "Deeply Nested Type",
         Severity::Info,
+        crate::domain::smell::FindingConfidence::Medium,
         SourceLocation::new(file.path.clone(), line, line, None),
         format!(
             "Type parameter nesting is {depth} levels deep (threshold: {threshold}). Approx type: `{type_str}`"

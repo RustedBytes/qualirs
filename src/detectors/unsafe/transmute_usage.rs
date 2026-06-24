@@ -26,6 +26,7 @@ impl Detector for TransmuteUsageDetector {
                 SmellCategory::Unsafe,
                 "Transmute Usage",
                 Severity::Critical,
+                crate::domain::smell::FindingConfidence::High,
                 SourceLocation {
                     file: file.path.clone(),
                     line_start: *line,

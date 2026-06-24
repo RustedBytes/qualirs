@@ -53,6 +53,7 @@ impl Detector for MagicNumbersDetector {
                         SmellCategory::Implementation,
                         "Magic Numbers",
                         Severity::Info,
+                        crate::domain::smell::FindingConfidence::Low,
                         SourceLocation {
                             file: file.path.clone(),
                             line_start: line,

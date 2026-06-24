@@ -36,6 +36,7 @@ impl Detector for TestOnlyDependencyInProductionDetector {
                         SmellCategory::Architecture,
                         "Test-only Dependency in Production",
                         Severity::Warning,
+                                                crate::domain::smell::FindingConfidence::Medium,
                         SourceLocation::new(file.path.clone(), line, line, None),
                         format!("Production source imports dev-dependency `{used}`"),
                         "Move the dependency to [dependencies] or keep the import under test-only cfg.",

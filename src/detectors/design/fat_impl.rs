@@ -44,6 +44,7 @@ impl Detector for FatImplDetector {
                             SmellCategory::Design,
                             "Fat Impl (God Object)",
                             Severity::Warning,
+                            crate::domain::smell::FindingConfidence::Medium,
                             SourceLocation::new(file.path.clone(), start_line, start_line, None),
                             format!(
                                 "Struct `{}` has {} methods in a single impl block (threshold: {})",

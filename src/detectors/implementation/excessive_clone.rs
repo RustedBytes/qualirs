@@ -29,6 +29,7 @@ impl Detector for ExcessiveCloneDetector {
                         SmellCategory::Performance,
                         "Excessive Clone",
                         Severity::Info,
+                                                crate::domain::smell::FindingConfidence::Medium,
                         SourceLocation {
                             file: file.path.clone(),
                             line_start: line,

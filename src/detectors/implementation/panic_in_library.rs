@@ -40,6 +40,7 @@ impl Detector for PanicInLibraryDetector {
                         SmellCategory::Idiomaticity,
                         "Panic in Library",
                         Severity::Warning,
+                                                crate::domain::smell::FindingConfidence::High,
                         SourceLocation {
                             file: file.path.clone(),
                             line_start: incident.line,

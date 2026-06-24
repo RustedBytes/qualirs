@@ -38,6 +38,7 @@ impl Detector for UnusedResultDetector {
                         SmellCategory::Idiomaticity,
                         "Unused Result Ignored",
                         Severity::Warning,
+                        crate::domain::smell::FindingConfidence::High,
                         SourceLocation {
                             file: file.path.clone(),
                             line_start: line,

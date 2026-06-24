@@ -27,6 +27,7 @@ impl Detector for ManualDefaultConstructorDetector {
                                 SmellCategory::Idiomaticity,
                                 "Manual Default Constructor",
                                 Severity::Info,
+                                                                crate::domain::smell::FindingConfidence::High,
                                 SourceLocation::new(file.path.clone(), line, line, None),
                                 "Constructor `new` appears to return only default field values",
                                 "Implement or derive Default and delegate `new()` to `Self::default()`.",

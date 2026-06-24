@@ -28,6 +28,7 @@ impl Detector for SpawnWithoutJoinDetector {
                         SmellCategory::Concurrency,
                         "Spawn Without Join",
                         Severity::Warning,
+                                                crate::domain::smell::FindingConfidence::High,
                         SourceLocation {
                             file: file.path.clone(),
                             line_start: *line,

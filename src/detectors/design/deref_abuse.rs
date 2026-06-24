@@ -37,6 +37,7 @@ impl Detector for DerefAbuseDetector {
                                         SmellCategory::Idiomaticity,
                                         "Deref Abuse",
                                         Severity::Warning,
+                                                                                crate::domain::smell::FindingConfidence::Low,
                                         SourceLocation {
                                             file: file.path.clone(),
                                             line_start: line,

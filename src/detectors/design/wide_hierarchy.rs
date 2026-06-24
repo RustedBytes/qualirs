@@ -75,6 +75,7 @@ fn enum_smell(
         SmellCategory::Design,
         "Wide Hierarchy",
         Severity::Warning,
+        crate::domain::smell::FindingConfidence::Medium,
         SourceLocation {
             file: file.path.clone(),
             line_start: line,
@@ -97,6 +98,7 @@ fn struct_smell(
         SmellCategory::Design,
         "Wide Hierarchy",
         Severity::Info,
+        crate::domain::smell::FindingConfidence::Medium,
         SourceLocation {
             file: file.path.clone(),
             line_start: line,

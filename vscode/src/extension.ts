@@ -15,6 +15,7 @@ interface QualirsConfig {
     runOnWorkspaceOpen: boolean;
     paused: boolean;
     minSeverity: string;
+    precision: string;
     category: string;
     threads: number;
     statusBarItem: boolean;
@@ -37,6 +38,7 @@ interface QualirsReport {
 interface QualirsFinding {
     code?: string;
     severity?: Severity;
+    confidence?: "low" | "medium" | "high";
     category?: string;
     name?: string;
     location?: {
@@ -343,6 +345,9 @@ function buildArgs(targetPath: string, workspaceFolder: vscode.WorkspaceFolder |
     if (config.minSeverity) {
         args.push("--min-severity", config.minSeverity);
     }
+    if (config.precision) {
+        args.push("--precision", config.precision);
+    }
     if (config.category) {
         args.push("--category", config.category);
     }
@@ -503,13 +508,23 @@ function diagnosticForFinding(finding: QualirsFinding): vscode.Diagnostic {
     const range = new vscode.Range(lineStart, column, lineEnd, column + 1);
     const code = finding.code ?? "Q0000";
     const name = finding.name ?? "qualirs finding";
+    const confidence = confidenceSuffix(finding);
     const message = finding.suggestion
-        ? `${name}: ${finding.message ?? ""}\n${finding.suggestion}`
-        : `${name}: ${finding.message ?? ""}`;
+        ? `${name}${confidence}: ${finding.message ?? ""}\n${finding.suggestion}`
+        : `${name}${confidence}: ${finding.message ?? ""}`;
     const diagnostic = new vscode.Diagnostic(range, message.trim(), vscodeSeverity(finding.severity));
     diagnostic.source = diagnosticSource;
     diagnostic.code = code;
     return diagnostic;
+}
+
+function confidenceSuffix(finding: QualirsFinding): string {
+    const precision = readConfig().precision;
+    if (!precision || precision === "conservative" || !finding.confidence) {
+        return "";
+    }
+
+    return ` [${finding.confidence} confidence]`;
 }
 
 function uriForFinding(finding: QualirsFinding, workspaceFolder: vscode.WorkspaceFolder | undefined): vscode.Uri | undefined {
@@ -723,6 +738,7 @@ function readConfig(): QualirsConfig {
         runOnWorkspaceOpen: config.get<boolean>("runOnWorkspaceOpen", true),
         paused: config.get<boolean>("paused", false),
         minSeverity: config.get<string>("minSeverity", ""),
+        precision: config.get<string>("precision", "conservative"),
         category: config.get<string>("category", ""),
         threads: Math.max(config.get<number>("threads", 0), 0),
         statusBarItem: config.get<boolean>("statusBarItem", true)

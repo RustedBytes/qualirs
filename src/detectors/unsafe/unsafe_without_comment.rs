@@ -49,6 +49,7 @@ impl<'ast, 'a> Visit<'ast> for UnsafeVisitor<'a> {
                 SmellCategory::Unsafe,
                 "Unsafe Without Comment",
                 Severity::Warning,
+                crate::domain::smell::FindingConfidence::High,
                 SourceLocation {
                     file: self.file_path.to_path_buf(),
                     line_start: line,
@@ -74,6 +75,7 @@ impl<'ast, 'a> Visit<'ast> for UnsafeVisitor<'a> {
                     SmellCategory::Unsafe,
                     "Unsafe Impl Without Comment",
                     Severity::Warning,
+                    crate::domain::smell::FindingConfidence::High,
                     SourceLocation {
                         file: self.file_path.to_path_buf(),
                         line_start: line,
@@ -100,6 +102,7 @@ impl<'ast, 'a> Visit<'ast> for UnsafeVisitor<'a> {
                     SmellCategory::Unsafe,
                     "Unsafe Fn Without Comment",
                     Severity::Warning,
+                                        crate::domain::smell::FindingConfidence::High,
                     SourceLocation {
                         file: self.file_path.to_path_buf(),
                         line_start: line,

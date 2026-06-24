@@ -50,6 +50,7 @@ fn match_depth_smell(
         SmellCategory::Implementation,
         "Deep Match Nesting",
         Severity::Warning,
+        crate::domain::smell::FindingConfidence::Medium,
         SourceLocation {
             file: file.path.clone(),
             line_start: line,

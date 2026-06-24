@@ -33,6 +33,7 @@ impl Detector for ExcessiveUnwrapDetector {
                         SmellCategory::Idiomaticity,
                         "Excessive Unwrap",
                         Severity::Warning,
+                        crate::domain::smell::FindingConfidence::High,
                         SourceLocation {
                             file: file.path.clone(),
                             line_start: line,

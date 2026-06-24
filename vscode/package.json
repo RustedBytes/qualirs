@@ -111,6 +111,16 @@
           ],
           "description": "Minimum severity to report. Empty uses qualirs.toml or the qualirs default."
         },
+        "qualirs.precision": {
+          "type": "string",
+          "default": "conservative",
+          "enum": [
+            "conservative",
+            "balanced",
+            "exploratory"
+          ],
+          "description": "Precision mode. Conservative shows only high-confidence findings; balanced and exploratory show broader heuristic results."
+        },
         "qualirs.category": {
           "type": "string",
           "default": "",

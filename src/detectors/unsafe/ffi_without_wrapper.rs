@@ -53,6 +53,7 @@ impl Detector for FfiWithoutWrapperDetector {
                     SmellCategory::Unsafe,
                     "FFI Without Wrapper",
                     Severity::Warning,
+                    crate::domain::smell::FindingConfidence::High,
                     SourceLocation {
                         file: file.path.clone(),
                         line_start: *line,

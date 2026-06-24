@@ -50,6 +50,8 @@ fn write_smell_json(smell: &Smell, json: &mut String) -> std::fmt::Result {
     write!(json, ",")?;
     write_json_field(json, "severity", severity_json(smell.severity))?;
     write!(json, ",")?;
+    write_json_field(json, "confidence", &smell.confidence.to_string())?;
+    write!(json, ",")?;
     write_json_field(json, "category", &smell.category.to_string())?;
     write!(json, ",")?;
     write_json_field(json, "name", &smell.name)?;
@@ -166,6 +168,7 @@ mod tests {
                 SmellCategory::Implementation,
                 "Quoted \"Name\"",
                 Severity::Warning,
+                crate::domain::smell::FindingConfidence::High,
                 SourceLocation::new(PathBuf::from("src\\main.rs"), 7, 9, Some(3)),
                 "line one\nline two",
                 "Use a tab\tcarefully",
@@ -178,6 +181,7 @@ mod tests {
 
         assert!(json.contains(r#""name":"Quoted \"Name\"""#));
         assert!(json.contains(r#""code":"Q0000""#));
+        assert!(json.contains(r#""confidence":"high""#));
         assert!(json.contains(r#""file":"src\\main.rs""#));
         assert!(fixed_json::validate_json(json.as_bytes()).is_ok());
     }

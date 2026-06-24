@@ -27,6 +27,7 @@ impl Detector for CharsCountLengthCheckDetector {
                     SmellCategory::Performance,
                     "Chars Count Length Check",
                     Severity::Info,
+                    crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), finding.line, finding.line, None),
                     "`chars().count()` walks the whole string for a length comparison",
                     finding.suggestion,

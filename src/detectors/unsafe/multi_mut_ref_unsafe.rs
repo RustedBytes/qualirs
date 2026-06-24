@@ -30,6 +30,7 @@ impl Detector for MultiMutRefUnsafeDetector {
                     SmellCategory::Unsafe,
                     "Multi Mut Ref Unsafe",
                     Severity::Critical,
+                                        crate::domain::smell::FindingConfidence::High,
                     SourceLocation {
                         file: file.path.clone(),
                         line_start: *line,

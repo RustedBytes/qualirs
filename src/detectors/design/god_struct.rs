@@ -30,6 +30,7 @@ impl Detector for GodStructDetector {
                         SmellCategory::Design,
                         "God Struct",
                         Severity::Warning,
+                        crate::domain::smell::FindingConfidence::Medium,
                         SourceLocation::new(file.path.clone(), line, line, None),
                         format!(
                             "Struct `{}` has {} fields (threshold: {})",

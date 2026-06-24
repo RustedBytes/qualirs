@@ -26,6 +26,7 @@ impl Detector for CollectThenIterateDetector {
                     SmellCategory::Performance,
                     "Collect Then Iterate",
                     Severity::Info,
+                    crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     "Iterator chain collects into a Vec and immediately iterates or queries it",
                     "Keep the chain lazy, or collect once and reuse the collection meaningfully.",

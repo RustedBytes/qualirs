@@ -35,6 +35,7 @@ impl Detector for StringlyTypedDomainDetector {
                         SmellCategory::Design,
                         "Stringly Typed Domain",
                         Severity::Info,
+                                                crate::domain::smell::FindingConfidence::Low,
                         SourceLocation::new(file.path.clone(), line, line, None),
                         format!(
                             "Struct `{}` has stringly typed domain fields: {}",

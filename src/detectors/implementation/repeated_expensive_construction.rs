@@ -37,6 +37,7 @@ impl Detector for RepeatedExpensiveConstructionDetector {
                     SmellCategory::Performance,
                     "Repeated Expensive Construction in Loop",
                     Severity::Info,
+                                        crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     format!("`{call}` is constructed inside a loop from loop-invariant input"),
                     "Hoist invariant parsers, URL patterns, glob patterns, and path templates outside the loop.",

@@ -140,6 +140,7 @@ fn smell(file: &SourceFile, line: usize, name: &str, in_loop: bool) -> Smell {
         SmellCategory::Performance,
         "Vec Contains in Loop",
         Severity::Info,
+        crate::domain::smell::FindingConfidence::High,
         SourceLocation::new(file.path.clone(), line, line, None),
         message,
         "Use a HashSet or BTreeSet when membership lookup dominates and ordering is not the main concern.",

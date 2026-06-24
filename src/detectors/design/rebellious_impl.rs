@@ -52,6 +52,7 @@ impl Detector for RebelliousImplDetector {
                                 SmellCategory::Design,
                                 "Rebellious Impl",
                                 Severity::Info,
+                                                                crate::domain::smell::FindingConfidence::Low,
                                 SourceLocation {
                                     file: file.path.clone(),
                                     line_start: line,

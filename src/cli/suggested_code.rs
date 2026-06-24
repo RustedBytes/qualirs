@@ -281,6 +281,7 @@ mod tests {
             SmellCategory::Implementation,
             name,
             Severity::Info,
+            crate::domain::smell::FindingConfidence::High,
             SourceLocation::new(PathBuf::from("src/lib.rs"), 1, 1, None),
             "message",
             "suggestion",

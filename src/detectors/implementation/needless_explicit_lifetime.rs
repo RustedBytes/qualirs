@@ -26,6 +26,7 @@ impl Detector for NeedlessExplicitLifetimeDetector {
                         SmellCategory::Idiomaticity,
                         "Needless Explicit Lifetime",
                         Severity::Info,
+                                                crate::domain::smell::FindingConfidence::High,
                         SourceLocation::new(file.path.clone(), line, line, None),
                         format!("Function `{}` appears to use an elidable explicit lifetime", func.sig.ident),
                         "Remove the named lifetime when lifetime elision rules can express the signature.",

@@ -32,6 +32,7 @@ impl Detector for DeepClosureNestingDetector {
                     SmellCategory::Implementation,
                     "Deep Closure Nesting",
                     Severity::Info,
+                    crate::domain::smell::FindingConfidence::Medium,
                     SourceLocation::new(file.path.clone(), line, line, None),
                     format!("Closure nesting depth is {depth} (threshold: {threshold})"),
                     "Extract nested closures into named functions or flatten the control flow.",

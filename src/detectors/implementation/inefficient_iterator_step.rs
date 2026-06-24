@@ -27,6 +27,7 @@ impl Detector for InefficientIteratorStepDetector {
                     SmellCategory::Performance,
                     "Inefficient Iterator Step",
                     Severity::Info,
+                    crate::domain::smell::FindingConfidence::High,
                     SourceLocation::new(file.path.clone(), finding.line, finding.line, None),
                     finding.message,
                     finding.suggestion,

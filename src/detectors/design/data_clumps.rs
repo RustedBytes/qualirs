@@ -74,6 +74,7 @@ impl Detector for DataClumpsDetector {
                     SmellCategory::Design,
                     "Data Clumps",
                     Severity::Warning,
+                    crate::domain::smell::FindingConfidence::Medium,
                     SourceLocation::new(file.path.clone(), first_line, first_line, None),
                     format!(
                         "Data Clump: Same {} parameters appear in {} functions: {}",

@@ -84,6 +84,7 @@ fn report_excessive_generics(
         SmellCategory::Design,
         "Excessive Generics",
         Severity::Warning,
+        crate::domain::smell::FindingConfidence::Medium,
         SourceLocation {
             file: file_path.to_path_buf(),
             line_start: line,
@@ -115,6 +116,7 @@ fn check_trait_bounds(
                     SmellCategory::Design,
                     "Deep Trait Bounds",
                     Severity::Info,
+                                        crate::domain::smell::FindingConfidence::Medium,
                     SourceLocation {
                         file: file_path.to_path_buf(),
                         line_start: line,

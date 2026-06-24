@@ -25,6 +25,7 @@ impl Detector for PublicApiLeakDetector {
                             SmellCategory::Architecture,
                             "Public API Leak",
                             Severity::Warning,
+                                                        crate::domain::smell::FindingConfidence::Medium,
                             SourceLocation::new(file.path.clone(), line, line, None),
                             format!("Public function `{}` exposes `{leak}` in its signature", func.sig.ident),
                             "Hide infrastructure types behind domain types or stable adapter interfaces.",

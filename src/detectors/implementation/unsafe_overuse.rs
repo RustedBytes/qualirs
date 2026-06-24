@@ -27,6 +27,7 @@ impl Detector for UnsafeOveruseDetector {
                 SmellCategory::Implementation,
                 "Unsafe Block Overuse",
                 Severity::Warning,
+                crate::domain::smell::FindingConfidence::Medium,
                 SourceLocation {
                     file: file.path.clone(),
                     line_start: 1,
