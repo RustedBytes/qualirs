@@ -74,6 +74,7 @@ impl<'ast> Visit<'ast> for UnusedResultVisitor {
         if let syn::Pat::Wild(wild) = &local.pat
             && let Some(init) = &local.init
             && !is_intentional_discard(&init.expr, &self.string_writers)
+            && expr_looks_result_like(&init.expr)
         {
             let description = describe_expr(&init.expr);
             let line = wild.underscore_token.span.start().line;
@@ -126,6 +127,67 @@ fn is_channel_send_discard(expr: &syn::Expr) -> bool {
         && receiver_path_tail(&call.receiver).is_some_and(|name| {
             name == "sender" || name == "tx" || name.ends_with("_sender") || name.ends_with("_tx")
         })
+}
+
+fn expr_looks_result_like(expr: &syn::Expr) -> bool {
+    match expr {
+        syn::Expr::Call(call) => call_looks_result_like(call),
+        syn::Expr::MethodCall(call) => method_call_looks_result_like(call),
+        syn::Expr::Macro(expr_macro) => macro_looks_result_like(&expr_macro.mac),
+        syn::Expr::Try(_) | syn::Expr::Await(_) => true,
+        syn::Expr::Paren(paren) => expr_looks_result_like(&paren.expr),
+        syn::Expr::Reference(reference) => expr_looks_result_like(&reference.expr),
+        _ => false,
+    }
+}
+
+fn call_looks_result_like(call: &syn::ExprCall) -> bool {
+    let name = extract_path_string(&call.func);
+    let tail = name.rsplit("::").next().unwrap_or(name.as_str());
+
+    name.starts_with("std::fs::")
+        || name.starts_with("tokio::fs::")
+        || name.starts_with("std::io::")
+        || tail.starts_with("try_")
+        || tail.ends_with("_result")
+        || matches!(
+            tail,
+            "open"
+                | "create"
+                | "remove_file"
+                | "read"
+                | "read_to_string"
+                | "read_to_end"
+                | "write"
+                | "write_all"
+                | "flush"
+                | "rename"
+                | "copy"
+                | "metadata"
+                | "canonicalize"
+        )
+}
+
+fn method_call_looks_result_like(call: &syn::ExprMethodCall) -> bool {
+    let method = call.method.to_string();
+    method.starts_with("try_")
+        || method.ends_with("_result")
+        || matches!(
+            method.as_str(),
+            "unwrap"
+                | "expect"
+                | "send"
+                | "write"
+                | "write_all"
+                | "flush"
+                | "read"
+                | "read_to_string"
+                | "read_to_end"
+        )
+}
+
+fn macro_looks_result_like(mac: &syn::Macro) -> bool {
+    mac.path.is_ident("write") || mac.path.is_ident("writeln")
 }
 
 fn macro_first_expr_ident(mac: &syn::Macro) -> Option<String> {

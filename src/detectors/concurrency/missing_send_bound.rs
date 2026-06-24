@@ -50,7 +50,7 @@ impl Detector for MissingSendBoundDetector {
                             SmellCategory::Concurrency,
                             "Missing Send Bound",
                             Severity::Warning,
-                                                        crate::domain::smell::FindingConfidence::High,
+                            crate::domain::smell::FindingConfidence::Medium,
                             SourceLocation {
                                 file: file.path.clone(),
                                 line_start: line,

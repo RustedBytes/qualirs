@@ -758,6 +758,20 @@ fn render(writer: Writer) {
         let code = "fn notify(sender: Sender) { let _ = sender.send(1); }";
         assert_clean(&DETECTOR, code);
     }
+
+    #[test]
+    fn clean_non_result_like_wildcard_assignments() {
+        let code = r#"
+fn ignore_values(value: String, iter: Vec<i32>, regex: Regex, guard: Guard) {
+    let _ = value.clone();
+    let _ = iter.iter().map(|item| item + 1);
+    let _ = regex.is_match("abc");
+    let _ = guard;
+    let _ = 1 + 2;
+}
+"#;
+        assert_clean(&DETECTOR, code);
+    }
 }
 
 mod repeated_regex_construction {
@@ -1202,6 +1216,24 @@ fn ok() {
 }
 ";
         assert_clean(&DETECTOR, code);
+    }
+
+    #[test]
+    fn unsafe_fn_and_impl_use_stable_rule_code() {
+        let code = r#"
+pub unsafe fn from_raw(ptr: *const i32) -> i32 { unsafe { *ptr } }
+unsafe impl Send for Marker {}
+struct Marker;
+"#;
+        let smells = common::detect(&DETECTOR, code);
+
+        assert_eq!(smells.len(), 3, "smells: {smells:?}");
+        assert!(
+            smells
+                .iter()
+                .all(|smell| smell.name == "Unsafe Without Comment")
+        );
+        assert!(smells.iter().all(|smell| smell.code == "Q0087"));
     }
 }
 
@@ -2006,7 +2038,14 @@ mod missing_send_bound {
     #[test]
     fn detects_missing_send() {
         let code = "fn run<T>(data: T) { spawn(move || { let _ = data; }); }";
-        assert_smell_count(&DETECTOR, code, "Missing Send Bound", 1);
+        let smells = common::detect(&DETECTOR, code);
+
+        assert_eq!(smells.len(), 1, "smells: {smells:?}");
+        assert_eq!(smells[0].name, "Missing Send Bound");
+        assert_eq!(
+            smells[0].confidence,
+            qualirs::domain::smell::FindingConfidence::Medium
+        );
     }
 
     #[test]
@@ -2084,7 +2123,14 @@ pub struct CConfig {
     value: i32,
 }
 "#;
-        assert_smell_count(&DETECTOR, code, "FFI Type Not repr(C)", 1);
+        let smells = common::detect(&DETECTOR, code);
+
+        assert_eq!(smells.len(), 1, "smells: {smells:?}");
+        assert_eq!(smells[0].name, "FFI Type Not repr(C)");
+        assert_eq!(
+            smells[0].confidence,
+            qualirs::domain::smell::FindingConfidence::Medium
+        );
     }
 
     #[test]

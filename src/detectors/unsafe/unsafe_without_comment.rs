@@ -73,7 +73,7 @@ impl<'ast, 'a> Visit<'ast> for UnsafeVisitor<'a> {
             if !has_safety_comment(self.source_lines, line) {
                 self.smells.push(Smell::new(
                     SmellCategory::Unsafe,
-                    "Unsafe Impl Without Comment",
+                    "Unsafe Without Comment",
                     Severity::Warning,
                     crate::domain::smell::FindingConfidence::High,
                     SourceLocation {
@@ -100,9 +100,9 @@ impl<'ast, 'a> Visit<'ast> for UnsafeVisitor<'a> {
             if !has_safety_comment(self.source_lines, line) {
                 self.smells.push(Smell::new(
                     SmellCategory::Unsafe,
-                    "Unsafe Fn Without Comment",
+                    "Unsafe Without Comment",
                     Severity::Warning,
-                                        crate::domain::smell::FindingConfidence::High,
+                    crate::domain::smell::FindingConfidence::High,
                     SourceLocation {
                         file: self.file_path.to_path_buf(),
                         line_start: line,
