@@ -655,6 +655,18 @@ impl<F: FnMut(&syn::Expr, &Context)> Scanner<F> {
 }
 
 impl<'a, F: FnMut(&syn::Expr, &Context)> Visit<'a> for Scanner<F> {
+    fn visit_stmt(&mut self, n: &'a syn::Stmt) {
+        // Statement-position macros are also opaque uses of bindings. Expose
+        // the macro to consumers without pretending to expand its token body.
+        if let syn::Stmt::Macro(m) = n {
+            let expr = syn::Expr::Macro(syn::ExprMacro {
+                attrs: m.attrs.clone(),
+                mac: m.mac.clone(),
+            });
+            (self.callback)(&expr, &self.context);
+        }
+        syn::visit::visit_stmt(self, n);
+    }
     fn visit_item_const(&mut self, n: &'a syn::ItemConst) {
         let prev = self.context.clone();
         self.context.in_const = true;

@@ -73,6 +73,30 @@ impl SourceNotes {
             gap
         }
     }
+
+    /// A trailing comment on an attribute belongs to the attributed item.
+    /// Unlike a trailing statement comment, it can explain that item's safety.
+    fn attribute_comments(&self, attrs: &[syn::Attribute]) -> String {
+        attrs
+            .iter()
+            .filter_map(|attr| {
+                let start = self.offset(attr.span().end());
+                let line: String = self.chars[start..]
+                    .iter()
+                    .take_while(|c| **c != '\n')
+                    .collect();
+                let text = line.trim_start();
+                if text.starts_with("//") {
+                    Some(line)
+                } else if text.starts_with("/*") {
+                    Some(text.split("*/").next().unwrap_or("").to_string())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 pub(crate) fn doc_text(attrs: &[syn::Attribute]) -> String {
@@ -98,9 +122,22 @@ pub(crate) fn doc_text(attrs: &[syn::Attribute]) -> String {
 }
 
 fn mentions_safety(text: &str) -> bool {
-    text.to_ascii_lowercase()
+    let words: Vec<_> = text
         .split(|c: char| !c.is_ascii_alphabetic())
-        .any(|w| w == "safety")
+        .filter(|w| !w.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect();
+    let text = format!(" {} ", words.join(" "));
+    words.iter().any(|w| w == "safety")
+        || text.contains(" safe because ")
+        || text.contains(" safe since ")
+        || text.contains("relies on the invariant")
+        || text.contains("according to")
+            && text.contains("documentation")
+            && words.iter().any(|w| w == "thread" || w == "threads")
+        || text.contains("do not")
+            && words.iter().any(|w| w == "hold")
+            && words.iter().any(|w| w == "reference" || w == "references")
 }
 
 pub(crate) struct SafetyDocs(HashSet<(usize, usize)>);
@@ -134,7 +171,9 @@ impl SafetyVisitor {
         }
     }
     fn own(&self, span: Span, attrs: &[syn::Attribute]) -> bool {
-        mentions_safety(&self.notes.leading(span)) || mentions_safety(&doc_text(attrs))
+        mentions_safety(&self.notes.leading(span))
+            || mentions_safety(&doc_text(attrs))
+            || mentions_safety(&self.notes.attribute_comments(attrs))
     }
     fn function(
         &mut self,
@@ -169,6 +208,12 @@ impl SafetyVisitor {
 }
 
 impl<'a> Visit<'a> for SafetyVisitor {
+    fn visit_local(&mut self, node: &'a syn::Local) {
+        let saved = self.documented;
+        self.documented |= self.own(node.span(), &node.attrs);
+        syn::visit::visit_local(self, node);
+        self.documented = saved;
+    }
     fn visit_item(&mut self, item: &'a syn::Item) {
         let saved = self.documented;
         self.documented = false;

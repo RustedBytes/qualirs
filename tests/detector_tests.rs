@@ -3665,6 +3665,7 @@ mod local_lock_in_single_threaded_scope {
     #[test]
     fn detects_local_mutex_lock() {
         let code = r#"
+use std::sync::Mutex;
 fn bump() {
     let lock = Mutex::new(0);
     *lock.lock().unwrap() += 1;
