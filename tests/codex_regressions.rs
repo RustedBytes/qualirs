@@ -1,7 +1,7 @@
 //! Source reductions from the Codex checkout audit.
 use qualirs::{
     analysis::detector::Detector,
-    detectors::{implementation as i, r#unsafe as u},
+    detectors::{implementation as i, r#unsafe as unsafe_detectors},
     domain::{
         smell::{FindingConfidence as Confidence, Smell},
         source::SourceFile,
@@ -181,7 +181,7 @@ fn constructors_need_executed_loop_and_resolved_constant_input() {
 
 #[test]
 fn ffi_wrapper_evidence_comes_from_calls_in_safe_functions_and_methods() {
-    let d = u::ffi_without_wrapper::FfiWithoutWrapperDetector;
+    let d = unsafe_detectors::ffi_without_wrapper::FfiWithoutWrapperDetector;
     // Every audited Q0091 declaration has a safe caller, often with a different name.
     for name in [
         "proc_listchildpids",

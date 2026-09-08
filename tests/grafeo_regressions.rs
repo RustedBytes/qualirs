@@ -1,5 +1,5 @@
 //! Reductions of the Grafeo audit, with supported positives and boundary cases.
-use qualirs::detectors::{concurrency as c, implementation as i, r#unsafe as u};
+use qualirs::detectors::{concurrency as c, implementation as i, r#unsafe as unsafe_detectors};
 use qualirs::{
     analysis::detector::Detector,
     domain::{
@@ -30,7 +30,7 @@ fn confidence(d: &dyn Detector, source: &str, expected: Confidence) {
 
 #[test]
 fn safety_explanations_survive_comments_attributes_and_unicode() {
-    let d = u::unsafe_without_comment::UnsafeWithoutCommentDetector;
+    let d = unsafe_detectors::unsafe_without_comment::UnsafeWithoutCommentDetector;
     for prefix in [
         "// SAFETY: valid pointer.\n// reason: conversion fits\n#[allow(unsafe_code)]",
         "// SAFETY: valid pointer.\n// Long explanation\n// continues\n// over several\n// lines.\n#[allow(unsafe_code)]",
@@ -50,7 +50,7 @@ fn safety_explanations_survive_comments_attributes_and_unicode() {
 
 #[test]
 fn safety_explanations_cover_explicit_operation_groups() {
-    let d = u::unsafe_without_comment::UnsafeWithoutCommentDetector;
+    let d = unsafe_detectors::unsafe_without_comment::UnsafeWithoutCommentDetector;
     clean(
         &d,
         "fn startup(flag: bool) {\n// SAFETY: no threads exist yet.\n#[allow(unsafe_code)]\nif flag { unsafe { std::env::set_var(\"X\", \"Y\") }; } else { unsafe { std::env::remove_var(\"X\") }; }\n}",
@@ -79,32 +79,32 @@ fn safety_explanations_cover_explicit_operation_groups() {
 fn function_body_preconditions_and_adjacent_marker_impls_are_documented() {
     let source = "struct Chunk;\n// SAFETY: contains no shared mutable state.\nunsafe impl Send for Chunk {}\nunsafe impl Sync for Chunk {}\n";
     clean(
-        &u::unsafe_without_comment::UnsafeWithoutCommentDetector,
+        &unsafe_detectors::unsafe_without_comment::UnsafeWithoutCommentDetector,
         source,
     );
     clean(
-        &u::unsafe_impl_safety_docs::UnsafeImplSafetyDocsDetector,
+        &unsafe_detectors::unsafe_impl_safety_docs::UnsafeImplSafetyDocsDetector,
         source,
     );
     let source = "struct Model;\n// SAFETY: synchronization protects state.\n// All access respects this invariant.\n// More detail here.\n#[allow(unsafe_code)]\nunsafe impl Send for Model {}\n#[allow(unsafe_code)]\nunsafe impl Sync for Model {}";
     clean(
-        &u::unsafe_without_comment::UnsafeWithoutCommentDetector,
+        &unsafe_detectors::unsafe_without_comment::UnsafeWithoutCommentDetector,
         source,
     );
     clean(
-        &u::unsafe_impl_safety_docs::UnsafeImplSafetyDocsDetector,
+        &unsafe_detectors::unsafe_impl_safety_docs::UnsafeImplSafetyDocsDetector,
         source,
     );
     for name in ["dot", "euclidean", "cosine", "manhattan"] {
         clean(
-            &u::unsafe_without_comment::UnsafeWithoutCommentDetector,
+            &unsafe_detectors::unsafe_without_comment::UnsafeWithoutCommentDetector,
             &format!(
                 "unsafe fn {name}() {{\nuse std::arch::x86_64::*;\n// SAFETY: dispatcher checked lengths and features.\nlet n = 0;\n}}"
             ),
         );
     }
     confidence(
-        &u::unsafe_impl_safety_docs::UnsafeImplSafetyDocsDetector,
+        &unsafe_detectors::unsafe_impl_safety_docs::UnsafeImplSafetyDocsDetector,
         "struct Raw(*mut u8); unsafe impl Send for Raw {}",
         Confidence::High,
     );
@@ -112,7 +112,7 @@ fn function_body_preconditions_and_adjacent_marker_impls_are_documented() {
 
 #[test]
 fn safety_notes_do_not_leak_into_unrelated_code_or_execution_contexts() {
-    let d = u::unsafe_without_comment::UnsafeWithoutCommentDetector;
+    let d = unsafe_detectors::unsafe_without_comment::UnsafeWithoutCommentDetector;
     for source in [
         "fn f(p: *const u8) { ordinary(); // SAFETY: this comment belongs to ordinary\nunsafe { *p }; }",
         "fn f(p: *const u8) { let text = r#\"// SAFETY: pretend comment\"#; unsafe { *p }; }",
@@ -123,7 +123,7 @@ fn safety_notes_do_not_leak_into_unrelated_code_or_execution_contexts() {
     ] {
         assert!(!detect(&d, source).is_empty(), "{source}");
     }
-    assert_eq!(detect(&u::unsafe_impl_safety_docs::UnsafeImplSafetyDocsDetector,
+    assert_eq!(detect(&unsafe_detectors::unsafe_impl_safety_docs::UnsafeImplSafetyDocsDetector,
         "struct A; struct B;\n// SAFETY: A is thread safe.\nunsafe impl Send for A {}\nunsafe impl Sync for B {}").len(), 1);
 }
 

@@ -1,4 +1,4 @@
-use qualirs::detectors::{concurrency as c, implementation as i, r#unsafe as u};
+use qualirs::detectors::{concurrency as c, implementation as i, r#unsafe as unsafe_detectors};
 use qualirs::{
     analysis::{detector::Detector, engine::Engine},
     domain::{
@@ -30,7 +30,7 @@ fn positive(detector: &dyn Detector, code: &str) {
 
 #[test]
 fn safe_mutable_access_is_not_unsafe_aliasing() {
-    let d = u::multi_mut_ref_unsafe::MultiMutRefUnsafeDetector;
+    let d = unsafe_detectors::multi_mut_ref_unsafe::MultiMutRefUnsafeDetector;
     clean(
         &d,
         "fn f(mut a: Option<i32>, mut b: Option<i32>) { let _ = a.as_mut(); let _ = b.as_mut(); }",
@@ -57,7 +57,7 @@ fn safe_mutable_access_is_not_unsafe_aliasing() {
 
 #[test]
 fn transmute_requires_exact_resolved_api() {
-    let d = u::transmute_usage::TransmuteUsageDetector;
+    let d = unsafe_detectors::transmute_usage::TransmuteUsageDetector;
     clean(&d, "fn transmute_label() {} fn f() { transmute_label(); }");
     clean(
         &d,
@@ -80,7 +80,7 @@ fn transmute_requires_exact_resolved_api() {
 
 #[test]
 fn raw_pointer_arithmetic_requires_pointer_type() {
-    let d = u::raw_pointer_arithmetic::RawPointerArithmeticDetector;
+    let d = unsafe_detectors::raw_pointer_arithmetic::RawPointerArithmeticDetector;
     clean(&d, "fn f(raw: usize) -> usize { raw.wrapping_add(1) }");
     clean(
         &d,
@@ -96,11 +96,11 @@ fn raw_pointer_arithmetic_requires_pointer_type() {
 #[test]
 fn aliases_generics_and_shadowed_imports_do_not_invent_types() {
     clean(
-        &u::transmute_usage::TransmuteUsageDetector,
+        &unsafe_detectors::transmute_usage::TransmuteUsageDetector,
         "mod std {} use std::mem::transmute as cast; fn f() { cast(1); }",
     );
     positive(
-        &u::transmute_usage::TransmuteUsageDetector,
+        &unsafe_detectors::transmute_usage::TransmuteUsageDetector,
         "mod std {} use ::std::mem::transmute as cast; unsafe fn f(x:u32) { cast::<u32,f32>(x); }",
     );
     clean(
@@ -112,7 +112,7 @@ fn aliases_generics_and_shadowed_imports_do_not_invent_types() {
         "fn value()->Result<(),Error> { todo!() } fn f() { use custom::value; let _=value(); }",
     );
     clean(
-        &u::multi_mut_ref_unsafe::MultiMutRefUnsafeDetector,
+        &unsafe_detectors::multi_mut_ref_unsafe::MultiMutRefUnsafeDetector,
         "unsafe fn f(p:*mut i32,q:*mut i32) { let a=&mut *p; let p=q; let b=&mut *p; }",
     );
     clean(
@@ -526,7 +526,9 @@ fn inline_test_policy_precision_locations_and_ignores() {
             },
             ..Default::default()
         });
-        engine.register(Box::new(u::transmute_usage::TransmuteUsageDetector));
+        engine.register(Box::new(
+            unsafe_detectors::transmute_usage::TransmuteUsageDetector,
+        ));
         let report = engine.analyze(&file);
         assert!(report.parse_errors.is_empty());
         assert_eq!(report.smells.len(), if skip { 2 } else { 4 });
@@ -542,7 +544,7 @@ fn inline_test_policy_precision_locations_and_ignores() {
         }
     }
     clean(
-        &u::transmute_usage::TransmuteUsageDetector,
+        &unsafe_detectors::transmute_usage::TransmuteUsageDetector,
         "#[cfg(test)] mod tests { unsafe fn f(x:u32) { std::mem::transmute::<u32,f32>(x); } }",
     );
     std::fs::write(&file,"fn f(s:&str) { s.chars().count()==2; }\n// qualirs:ignore Q0088\nunsafe fn ignored(x:u32) { std::mem::transmute::<u32,f32>(x); }\n").unwrap();
@@ -558,7 +560,9 @@ fn inline_test_policy_precision_locations_and_ignores() {
         engine.register(Box::new(
             i::chars_count_length_check::CharsCountLengthCheckDetector,
         ));
-        engine.register(Box::new(u::transmute_usage::TransmuteUsageDetector));
+        engine.register(Box::new(
+            unsafe_detectors::transmute_usage::TransmuteUsageDetector,
+        ));
         let report = engine.analyze(&file);
         assert_eq!(report.smells.len(), count);
         assert!(

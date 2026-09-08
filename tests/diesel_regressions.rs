@@ -3,7 +3,7 @@ use qualirs::{
     analysis::detector::Detector,
     detectors::{
         architecture::project_hygiene::TestOnlyDependencyInProductionDetector, implementation as i,
-        r#unsafe as u,
+        r#unsafe as unsafe_detectors,
     },
     domain::{
         smell::{FindingConfidence as Confidence, Smell},
@@ -62,11 +62,11 @@ fn diesel_send_sync_explanations_do_not_require_a_safety_label() {
     ] {
         let code = format!("struct {name};\n{note}\nunsafe impl {trait_name} for {name} {{}}");
         clean(
-            &u::unsafe_without_comment::UnsafeWithoutCommentDetector,
+            &unsafe_detectors::unsafe_without_comment::UnsafeWithoutCommentDetector,
             &code,
         );
         clean(
-            &u::unsafe_impl_safety_docs::UnsafeImplSafetyDocsDetector,
+            &unsafe_detectors::unsafe_impl_safety_docs::UnsafeImplSafetyDocsDetector,
             &code,
         );
     }
@@ -74,7 +74,7 @@ fn diesel_send_sync_explanations_do_not_require_a_safety_label() {
 
 #[test]
 fn natural_explanations_stay_attached_to_their_syntax() {
-    let d = u::unsafe_without_comment::UnsafeWithoutCommentDetector;
+    let d = unsafe_detectors::unsafe_without_comment::UnsafeWithoutCommentDetector;
     clean(
         &d,
         "fn populate() {\n// This is safe because we are re-binding the invalidated buffers\n// at the end of this function\nunsafe { fetch_column(); }\n}",
@@ -107,7 +107,7 @@ fn natural_explanations_stay_attached_to_their_syntax() {
         assert!(!detect(&d, code).is_empty(), "{code}");
     }
     let found = detect(
-        &u::unsafe_impl_safety_docs::UnsafeImplSafetyDocsDetector,
+        &unsafe_detectors::unsafe_impl_safety_docs::UnsafeImplSafetyDocsDetector,
         "struct A;\n// TODO: review thread handling.\nunsafe impl Send for A {}",
     );
     assert_eq!(found.len(), 1);

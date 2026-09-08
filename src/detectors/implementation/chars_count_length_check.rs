@@ -72,10 +72,9 @@ fn character_count_comparison(expr: &syn::Expr, ctx: &evidence::Context) -> Opti
     }
     let (count, limit, reversed) = if let Some(n) = super::perf_utils::int_lit_value(&b.right) {
         (&*b.left, n, false)
-    } else if let Some(n) = super::perf_utils::int_lit_value(&b.left) {
-        (&*b.right, n, true)
     } else {
-        return None;
+        let n = super::perf_utils::int_lit_value(&b.left)?;
+        (&*b.right, n, true)
     };
     if !is_string_character_count(count, ctx) {
         return None;

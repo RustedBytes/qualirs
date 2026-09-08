@@ -109,22 +109,19 @@ impl Lock {
         if self.escaped || self.uses != self.locking_uses {
             return None;
         }
-        if let Some(line) = self.line {
-            Some(Smell::new(
-                SmellCategory::Performance,
-                LocalLockInSingleThreadedScopeDetector.name(),
-                Severity::Info,
-                FindingConfidence::High,
-                SourceLocation::new(file.path.clone(), line, line, None),
-                format!(
-                    "Local standard {} binding '{}' is used only for locking in one execution scope",
-                    self.kind, self.name
-                ),
-                "Consider plain mutable state when synchronization and poisoning semantics are unnecessary.",
-            ))
-        } else {
-            None
-        }
+        let line = self.line?;
+        Some(Smell::new(
+            SmellCategory::Performance,
+            LocalLockInSingleThreadedScopeDetector.name(),
+            Severity::Info,
+            FindingConfidence::High,
+            SourceLocation::new(file.path.clone(), line, line, None),
+            format!(
+                "Local standard {} binding '{}' is used only for locking in one execution scope",
+                self.kind, self.name
+            ),
+            "Consider plain mutable state when synchronization and poisoning semantics are unnecessary.",
+        ))
     }
 }
 

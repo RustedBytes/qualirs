@@ -58,11 +58,14 @@ impl Detector for RepeatedRegexConstructionDetector {
     }
 }
 
+type SpanKey = (usize, usize, usize, usize);
+type RegexEvidence = (bool, FindingConfidence);
+
 struct RegexVisitor {
     loop_depth: usize,
     lazy_initializer_depth: usize,
     findings: Vec<(usize, bool, FindingConfidence)>,
-    candidates: HashMap<(usize, usize, usize, usize), (bool, FindingConfidence)>,
+    candidates: HashMap<SpanKey, RegexEvidence>,
 }
 
 impl<'ast> Visit<'ast> for RegexVisitor {
@@ -148,10 +151,7 @@ fn is_lazy_initializer_method(method: &str) -> bool {
     matches!(method, "get_or_init" | "get_or_try_init")
 }
 
-fn regex_candidate(
-    expr: &syn::Expr,
-    ctx: &evidence::Context,
-) -> Option<((usize, usize, usize, usize), (bool, FindingConfidence))> {
+fn regex_candidate(expr: &syn::Expr, ctx: &evidence::Context) -> Option<(SpanKey, RegexEvidence)> {
     let syn::Expr::Call(call) = expr else {
         return None;
     };

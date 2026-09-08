@@ -119,12 +119,8 @@ fn mapping_finding(expr: &syn::Expr, ctx: &evidence::Context, file: &SourceFile)
     let [first, second] = node.arms.as_slice() else {
         return None;
     };
-    let Some(a) = arm_shape(first, ctx) else {
-        return None;
-    };
-    let Some(b) = arm_shape(second, ctx) else {
-        return None;
-    };
+    let a = arm_shape(first, ctx)?;
+    let b = arm_shape(second, ctx)?;
     let paired = matches!(
         (a.0, b.0),
         (Variant::Some, Variant::None)

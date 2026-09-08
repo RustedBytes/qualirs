@@ -180,25 +180,22 @@ fn discarded_result_finding(
     } else {
         None
     };
-    if let Some(confidence) = confidence {
-        Some(Smell::new(
-            SmellCategory::Idiomaticity,
-            UnusedResultDetector.name(),
-            Severity::Warning,
-            confidence,
-            SourceLocation::new(file.path.clone(), p.line, p.line, None),
-            if confidence == FindingConfidence::High {
-                "A Result is discarded without handling its error"
-            } else if documented && matches!(ctx.expr(expr), Kind::Result(_)) {
-                "A Result is discarded in destructor or documented best-effort code; review error observability"
-            } else {
-                "This discarded expression may return a Result; its type is unresolved"
-            },
-            "Handle the error or document why discarding it is intentional.",
-        ))
-    } else {
-        None
-    }
+    let confidence = confidence?;
+    Some(Smell::new(
+        SmellCategory::Idiomaticity,
+        UnusedResultDetector.name(),
+        Severity::Warning,
+        confidence,
+        SourceLocation::new(file.path.clone(), p.line, p.line, None),
+        if confidence == FindingConfidence::High {
+            "A Result is discarded without handling its error"
+        } else if documented && matches!(ctx.expr(expr), Kind::Result(_)) {
+            "A Result is discarded in destructor or documented best-effort code; review error observability"
+        } else {
+            "This discarded expression may return a Result; its type is unresolved"
+        },
+        "Handle the error or document why discarding it is intentional.",
+    ))
 }
 
 enum DiscardIntent {

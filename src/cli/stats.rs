@@ -98,7 +98,7 @@ fn format_duration(duration: Duration) -> String {
             }
             seconds %= size;
         }
-        if seconds > 0 || millis % MILLIS_PER_SECOND > 0 || parts.is_empty() {
+        if seconds > 0 || !millis.is_multiple_of(MILLIS_PER_SECOND) || parts.is_empty() {
             let value =
                 seconds as f64 + (millis % MILLIS_PER_SECOND) as f64 / MILLIS_PER_SECOND as f64;
             parts.push(format!("{} s", compact_decimal(value)));
