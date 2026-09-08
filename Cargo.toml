@@ -1,6 +1,6 @@
 [package]
 name = "qualirs"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
 description = "Structural and architectural code smell detector for Rust"
 license = "MIT"
@@ -15,7 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 # AST parsing
-syn = { version = "2", features = ["full", "visit", "parsing", "printing"] }
+syn = { version = "3", features = ["full", "visit", "parsing", "printing"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 quote = "1"
 
@@ -24,7 +24,7 @@ clap = { version = "4", features = ["derive"] }
 
 # Terminal output
 colored = "3"
-comfy-table = "7"
+comfy-table = "8"
 
 # Config
 serde = { version = "1", features = ["derive"] }
