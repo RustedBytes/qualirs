@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::analysis::detector::Detector;
 use crate::detectors::policy::{is_dto_template_or_config_struct, is_test_path};
 use crate::domain::smell::{Severity, Smell, SmellCategory, SourceLocation};
@@ -40,7 +42,7 @@ impl Detector for AnemicStructDetector {
         }
 
         // Collect struct names that have impl blocks (inherent or trait) in this file
-        let impl_targets: Vec<&syn::Ident> = file
+        let impl_targets: HashSet<&syn::Ident> = file
             .ast
             .items
             .iter()
@@ -51,7 +53,7 @@ impl Detector for AnemicStructDetector {
             .collect();
 
         for s in &structs_with_fields {
-            let has_impl = impl_targets.contains(&&s.ident);
+            let has_impl = impl_targets.contains(&s.ident);
             if !has_impl {
                 let line = line_of_struct(s);
 
