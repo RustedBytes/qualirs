@@ -26,7 +26,9 @@ pub unsafe fn from_raw(ptr: *const u8) -> u8 {
 struct Sendable(*mut u8);
 unsafe impl Send for Sendable {}
 
-fn unsafe_patterns(ptr: *mut i32, value: u32) {
+// The raw API is only called from unsafe code, so local safe wrapper coverage
+// remains an exploratory review candidate.
+unsafe fn unsafe_patterns(ptr: *mut i32, value: u32) {
     unsafe {
         let _cast: f32 = std::mem::transmute(value);
         let _ = ptr.add(1).read();

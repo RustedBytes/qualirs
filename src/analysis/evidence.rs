@@ -39,6 +39,7 @@ pub(crate) struct Context {
     bindings: Vec<HashMap<String, Kind>>,
     origins: HashMap<String, (usize, usize)>,
     pub in_async: bool,
+    pub in_const: bool,
     pub loop_depth: usize,
     pub loop_start: (usize, usize),
     pub execution: (usize, usize),
@@ -631,6 +632,7 @@ impl<F: FnMut(&syn::Expr, &Context)> Scanner<F> {
         self.context.bindings = vec![HashMap::new()];
         self.context.origins.clear();
         self.context.in_async = sig.asyncness.is_some();
+        self.context.in_const = sig.constness.is_some();
         self.context.loop_depth = 0;
         let start = sig.ident.span().start();
         self.context.execution = (start.line, start.column);
@@ -653,6 +655,43 @@ impl<F: FnMut(&syn::Expr, &Context)> Scanner<F> {
 }
 
 impl<'a, F: FnMut(&syn::Expr, &Context)> Visit<'a> for Scanner<F> {
+    fn visit_item_const(&mut self, n: &'a syn::ItemConst) {
+        let prev = self.context.clone();
+        self.context.in_const = true;
+        self.context.loop_depth = 0;
+        self.visit_expr(&n.expr);
+        self.context = prev;
+    }
+    fn visit_item_static(&mut self, n: &'a syn::ItemStatic) {
+        let prev = self.context.clone();
+        self.context.in_const = true;
+        self.context.loop_depth = 0;
+        self.visit_expr(&n.expr);
+        self.context = prev;
+    }
+    fn visit_impl_item_const(&mut self, n: &'a syn::ImplItemConst) {
+        let prev = self.context.clone();
+        self.context.in_const = true;
+        self.context.loop_depth = 0;
+        self.visit_expr(&n.expr);
+        self.context = prev;
+    }
+    fn visit_trait_item_const(&mut self, n: &'a syn::TraitItemConst) {
+        let prev = self.context.clone();
+        self.context.in_const = true;
+        self.context.loop_depth = 0;
+        if let Some((_, expr)) = &n.default {
+            self.visit_expr(expr);
+        }
+        self.context = prev;
+    }
+    fn visit_expr_const(&mut self, n: &'a syn::ExprConst) {
+        let prev = self.context.clone();
+        self.context.in_const = true;
+        self.context.loop_depth = 0;
+        self.visit_block(&n.block);
+        self.context = prev;
+    }
     fn visit_item_fn(&mut self, n: &'a syn::ItemFn) {
         if !crate::detectors::policy::has_test_cfg(&n.attrs) {
             self.function(&n.sig, &n.block);

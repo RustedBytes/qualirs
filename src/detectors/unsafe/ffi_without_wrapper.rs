@@ -1,11 +1,13 @@
-use crate::analysis::detector::Detector;
-use crate::domain::smell::{Severity, Smell, SmellCategory, SourceLocation};
-use crate::domain::source::SourceFile;
+use std::collections::HashSet;
+use syn::{spanned::Spanned, visit::Visit};
 
-/// Detects extern blocks (FFI declarations) without corresponding safe wrappers.
-///
-/// Raw FFI functions should be wrapped in safe Rust functions that validate
-/// inputs and handle errors properly.
+use crate::analysis::{detector::Detector, evidence};
+use crate::domain::{
+    smell::{FindingConfidence, Severity, Smell, SmellCategory, SourceLocation},
+    source::SourceFile,
+};
+
+/// Finds foreign declarations for which no local safe caller can be established.
 pub struct FfiWithoutWrapperDetector;
 
 impl Detector for FfiWithoutWrapperDetector {
@@ -14,61 +16,114 @@ impl Detector for FfiWithoutWrapperDetector {
     }
 
     fn detect(&self, file: &SourceFile) -> Vec<Smell> {
-        let mut smells = Vec::new();
+        let mut findings = Vec::new();
+        inspect_module(&file.ast.items, file, &mut findings);
+        findings
+    }
+}
 
-        // Collect extern function names
-        let mut extern_fns: Vec<(String, usize)> = Vec::new();
-        // Collect all pub fn names that could be wrappers
-        let mut safe_wrappers: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-        for item in &file.ast.items {
-            match item {
-                syn::Item::ForeignMod(fm) => {
-                    for item in &fm.items {
-                        if let syn::ForeignItem::Fn(fn_decl) = item {
-                            let name = fn_decl.sig.ident.to_string();
-                            let line = fn_decl.sig.fn_token.span.start().line;
-                            extern_fns.push((name, line));
-                        }
+fn inspect_module(items: &[syn::Item], file: &SourceFile, findings: &mut Vec<Smell>) {
+    let mut declarations = Vec::new();
+    for item in items {
+        match item {
+            syn::Item::ForeignMod(m) => {
+                for item in &m.items {
+                    if let syn::ForeignItem::Fn(f) = item {
+                        declarations
+                            .push((f.sig.ident.to_string(), f.sig.fn_token.span.start().line));
                     }
                 }
-                syn::Item::Fn(fn_item)
-                    // A safe wrapper is a non-extern pub fn
-                    if !matches!(fn_item.sig.safety, syn::Safety::Unsafe(_)) => {
-                        safe_wrappers.insert(fn_item.sig.ident.to_string());
-                    }
-                _ => {}
             }
-        }
-
-        for (name, line) in &extern_fns {
-            // Check if there's a corresponding safe wrapper
-            let has_wrapper = safe_wrappers.iter().any(|w| {
-                // Common patterns: ffi_name -> ffi_name_wrapper, safe_ffi_name, wrap_ffi_name
-                w.contains(name) || name.contains(w)
-            });
-
-            if !has_wrapper {
-                smells.push(Smell::new(
-                    SmellCategory::Unsafe,
-                    "FFI Without Wrapper",
-                    Severity::Warning,
-                    crate::domain::smell::FindingConfidence::High,
-                    SourceLocation {
-                        file: file.path.clone(),
-                        line_start: *line,
-                        line_end: *line,
-                        column: None,
-                    },
-                    format!(
-                        "FFI function `{}` has no safe Rust wrapper in this file",
-                        name
-                    ),
-                    "Create a safe wrapper function that validates inputs and handles errors.",
-                ));
+            syn::Item::Mod(m) if !crate::detectors::policy::has_test_cfg(&m.attrs) => {
+                if let Some((_, items)) = &m.content {
+                    inspect_module(items, file, findings);
+                }
             }
+            _ => {}
         }
+    }
+    if declarations.is_empty() {
+        return;
+    }
+    // Analyze one lexical module at a time. A similarly named wrapper in another
+    // module, or an unrelated function with a matching name, proves nothing.
+    let ast = syn::File {
+        frontmatter: None,
+        shebang: None,
+        attrs: Vec::new(),
+        items: items.to_vec(),
+    };
+    let mut callers = SafeCalls {
+        safe: false,
+        calls: HashSet::new(),
+    };
+    callers.visit_file(&ast);
+    let mut wrapped = HashSet::new();
+    evidence::inspect(&ast, |expr, ctx| {
+        if !callers.calls.contains(&evidence::span_key(expr.span())) {
+            return;
+        }
+        let syn::Expr::Call(c) = expr else {
+            return;
+        };
+        let syn::Expr::Path(p) = &*c.func else {
+            return;
+        };
+        let resolved = ctx.path(&p.path);
+        wrapped.insert(
+            resolved
+                .strip_prefix("self::")
+                .unwrap_or(&resolved)
+                .to_string(),
+        );
+    });
+    for (name, line) in declarations {
+        if wrapped.contains(&name) {
+            continue;
+        }
+        findings.push(Smell::new(SmellCategory::Unsafe, "FFI Without Wrapper", Severity::Warning,
+            FindingConfidence::Low, SourceLocation::new(file.path.clone(), line, line, None),
+            format!("No local safe caller was resolved for FFI function `{name}`; a wrapper may exist elsewhere"),
+            "Review callers and provide a safe wrapper that validates inputs when the API permits one."));
+    }
+}
 
-        smells
+struct SafeCalls {
+    safe: bool,
+    calls: HashSet<(usize, usize, usize, usize)>,
+}
+impl<'a> Visit<'a> for SafeCalls {
+    fn visit_item_mod(&mut self, _: &'a syn::ItemMod) {}
+    fn visit_item_fn(&mut self, n: &'a syn::ItemFn) {
+        if crate::detectors::policy::has_test_cfg(&n.attrs) {
+            return;
+        }
+        let prev = self.safe;
+        self.safe = !matches!(n.sig.safety, syn::Safety::Unsafe(_));
+        self.visit_block(&n.block);
+        self.safe = prev;
+    }
+    fn visit_impl_item_fn(&mut self, n: &'a syn::ImplItemFn) {
+        if crate::detectors::policy::has_test_cfg(&n.attrs) {
+            return;
+        }
+        let prev = self.safe;
+        self.safe = !matches!(n.sig.safety, syn::Safety::Unsafe(_));
+        self.visit_block(&n.block);
+        self.safe = prev;
+    }
+    fn visit_trait_item_fn(&mut self, n: &'a syn::TraitItemFn) {
+        let prev = self.safe;
+        self.safe = !matches!(n.sig.safety, syn::Safety::Unsafe(_));
+        if let Some(block) = &n.default {
+            self.visit_block(block);
+        }
+        self.safe = prev;
+    }
+    fn visit_expr_call(&mut self, n: &'a syn::ExprCall) {
+        if self.safe {
+            self.calls.insert(evidence::span_key(n.span()));
+        }
+        syn::visit::visit_expr_call(self, n);
     }
 }
