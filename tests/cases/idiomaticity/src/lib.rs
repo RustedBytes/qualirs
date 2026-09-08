@@ -26,8 +26,8 @@ fn many_unwraps() {
     let _ = Some(4).unwrap();
 }
 
-fn ignore_result(mut out: Vec<u8>) {
-    out.write_all(b"ignored");
+fn ignore_result() {
+    let _ = std::fs::write("log.txt", b"ignored");
 }
 
 #[derive(Copy, Clone)]
@@ -104,5 +104,16 @@ struct Debuggable {
 impl std::fmt::Debug for Debuggable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Debuggable")
+    }
+}
+
+struct Mechanical {
+    value: String,
+}
+impl Default for Mechanical {
+    fn default() -> Self {
+        Self {
+            value: String::new(),
+        }
     }
 }

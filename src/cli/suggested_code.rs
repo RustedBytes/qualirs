@@ -16,10 +16,15 @@ fn source_line(smell: &Smell) -> Option<String> {
 }
 
 fn suggested_line_for(smell: &Smell, line: &str) -> Option<String> {
+    if smell.confidence != crate::domain::smell::FindingConfidence::High {
+        return None;
+    }
     match smell.code.as_str() {
-        "Q0054" => rewrite_push_str_format(line),
+        // Formatting and iterator rewrites require receiver/trait and borrow
+        // information that these line-only suggestions cannot establish.
+        "Q0054" => None,
         "Q0058" | "Q0064" => remove_clone_call(line),
-        "Q0059" => rewrite_iterator_step(line),
+        "Q0059" => None,
         "Q0060" => rewrite_chars_count(line),
         "Q0076" => elide_lifetime(line),
         _ => None,
@@ -27,47 +32,44 @@ fn suggested_line_for(smell: &Smell, line: &str) -> Option<String> {
 }
 
 fn remove_clone_call(line: &str) -> Option<String> {
-    line.contains(".clone()")
+    use syn::visit::Visit;
+    struct Clones(usize);
+    impl<'a> Visit<'a> for Clones {
+        fn visit_expr_method_call(&mut self, c: &'a syn::ExprMethodCall) {
+            if c.method == "clone" && c.args.is_empty() {
+                self.0 += 1;
+            }
+            syn::visit::visit_expr_method_call(self, c);
+        }
+    }
+    let block = syn::parse_str::<syn::Block>(&format!("{{\n{line}\n}}")).ok()?;
+    let mut clones = Clones(0);
+    clones.visit_block(&block);
+    (clones.0 == 1 && line.matches(".clone()").count() == 1)
         .then(|| line.replacen(".clone()", "", 1))
 }
 
-fn rewrite_iterator_step(line: &str) -> Option<String> {
-    if line.contains(".nth(0)") {
-        return Some(line.replacen(".nth(0)", ".next()", 1));
-    }
-
-    rewrite_skip_next(line)
-}
-
-fn rewrite_skip_next(line: &str) -> Option<String> {
-    let skip_start = line.find(".skip(")?;
-    let open_paren = skip_start + ".skip".len();
-    let close_paren = matching_paren(line, open_paren)?;
-    let next_start = close_paren + 1;
-    let next_call = ".next()";
-    if !line.get(next_start..)?.starts_with(next_call) {
-        return None;
-    }
-
-    let arg_start = open_paren + 1;
-    let arg = line.get(arg_start..close_paren)?.trim();
-    if arg.is_empty() {
-        return None;
-    }
-
-    Some(format!(
-        "{}.nth({}){}",
-        &line[..skip_start],
-        arg,
-        &line[next_start + next_call.len()..]
-    ))
-}
-
 fn rewrite_chars_count(line: &str) -> Option<String> {
-    rewrite_chars_count_empty_check(line).or_else(|| {
-        line.contains(".chars().count()")
-            .then(|| line.replacen(".chars().count()", ".len()", 1))
-    })
+    use syn::visit::Visit;
+    struct Counts(usize);
+    impl<'a> Visit<'a> for Counts {
+        fn visit_expr_method_call(&mut self, c: &'a syn::ExprMethodCall) {
+            if c.method == "count"
+                && c.args.is_empty()
+                && matches!(&*c.receiver, syn::Expr::MethodCall(m) if m.method == "chars" && m.args.is_empty())
+            {
+                self.0 += 1;
+            }
+            syn::visit::visit_expr_method_call(self, c);
+        }
+    }
+    let block = syn::parse_str::<syn::Block>(&format!("{{\n{line}\n}}")).ok()?;
+    let mut counts = Counts(0);
+    counts.visit_block(&block);
+    if counts.0 != 1 || line.matches(".chars().count()").count() != 1 {
+        return None;
+    }
+    rewrite_chars_count_empty_check(line)
 }
 
 fn rewrite_chars_count_empty_check(line: &str) -> Option<String> {
@@ -107,7 +109,7 @@ fn empty_check_tail(rest: &str) -> Option<(bool, &str)> {
         if after_zero
             .chars()
             .next()
-            .is_some_and(|ch| ch.is_ascii_digit())
+            .is_some_and(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.'))
         {
             return None;
         }
@@ -117,35 +119,14 @@ fn empty_check_tail(rest: &str) -> Option<(bool, &str)> {
     None
 }
 
-fn rewrite_push_str_format(line: &str) -> Option<String> {
-    let method_start = line.find(".push_str(")?;
-    let receiver_start = receiver_start(line, method_start)?;
-    let receiver = line.get(receiver_start..method_start)?.trim();
-    if receiver.is_empty() {
-        return None;
-    }
-
-    let open_paren = method_start + ".push_str".len();
-    let close_paren = matching_paren(line, open_paren)?;
-    let argument = line.get(open_paren + 1..close_paren)?.trim();
-    let macro_args = argument
-        .strip_prefix("&format!(")?
-        .strip_suffix(')')?
-        .trim();
-    if macro_args.is_empty() {
-        return None;
-    }
-
-    Some(format!(
-        "{}use std::fmt::Write as _;\n{}write!(&mut {}, {}).expect(\"write to String\");",
-        &line[..receiver_start],
-        &line[..receiver_start],
-        receiver,
-        macro_args
-    ))
-}
-
 fn elide_lifetime(line: &str) -> Option<String> {
+    let parsed = syn::parse_str::<syn::ItemFn>(line).ok().or_else(|| {
+        let signature = line.trim().strip_suffix('{')?.trim_end();
+        syn::parse_str::<syn::ItemFn>(&format!("{signature} {{}}")).ok()
+    })?;
+    if !crate::detectors::implementation::needless_explicit_lifetime::elidable(&parsed) {
+        return None;
+    }
     let fn_start = line.find("fn ")?;
     let generics_start = line[fn_start..].find('<')? + fn_start;
     let generics_end = line[generics_start..].find('>')? + generics_start;
@@ -190,28 +171,6 @@ fn is_receiver_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || matches!(ch, '_' | ':' | '.')
 }
 
-fn matching_paren(text: &str, open_paren: usize) -> Option<usize> {
-    if text.as_bytes().get(open_paren) != Some(&b'(') {
-        return None;
-    }
-
-    let mut depth = 0usize;
-    for (offset, ch) in text[open_paren..].char_indices() {
-        match ch {
-            '(' => depth += 1,
-            ')' => {
-                depth = depth.checked_sub(1)?;
-                if depth == 0 {
-                    return Some(open_paren + offset);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -231,12 +190,12 @@ mod tests {
     }
 
     #[test]
-    fn rewrites_skip_next_to_nth() {
+    fn omits_iterator_rewrite_without_type_evidence() {
         let smell = smell("Inefficient Iterator Step");
 
         assert_eq!(
             suggested_line_for(&smell, "    values.skip(3).next()").as_deref(),
-            Some("    values.nth(3)")
+            None
         );
     }
 
@@ -251,14 +210,12 @@ mod tests {
     }
 
     #[test]
-    fn rewrites_push_str_format_to_write_macro() {
+    fn omits_formatting_rewrite_without_borrow_evidence() {
         let smell = smell("Needless Intermediate String Formatting");
 
         assert_eq!(
             suggested_line_for(&smell, r#"    line.push_str(&format!("id={id}"));"#).as_deref(),
-            Some(
-                "    use std::fmt::Write as _;\n    write!(&mut line, \"id={id}\").expect(\"write to String\");"
-            )
+            None
         );
     }
 
@@ -273,6 +230,94 @@ mod tests {
             )
             .as_deref(),
             Some("fn needless_lifetime(value: &str) -> &str {")
+        );
+    }
+
+    #[test]
+    fn omits_ambiguous_or_semantically_different_rewrites() {
+        let chars = smell("Chars Count Length Check");
+        for line in [
+            "s.chars().count() == 2",
+            "s.chars().count() + 1",
+            "s.chars().count() == 0usize",
+            "(a.chars().count() == 0, b.chars().count() == 0)",
+            "\"s.chars().count() == 0\"",
+        ] {
+            assert_eq!(suggested_line_for(&chars, line), None, "{line}");
+        }
+        assert_eq!(
+            suggested_line_for(&smell("Clone on Copy"), "(a.clone(), b.clone())"),
+            None
+        );
+        assert_eq!(
+            suggested_line_for(
+                &smell("Needless Explicit Lifetime"),
+                "fn f<'a: 'static>(x: &'a str) -> &'static str { x }"
+            ),
+            None
+        );
+        let mut uncertain = chars;
+        uncertain.confidence = crate::domain::smell::FindingConfidence::Low;
+        assert_eq!(
+            suggested_line_for(&uncertain, "s.chars().count() == 0"),
+            None
+        );
+    }
+
+    #[test]
+    fn generated_replacements_compile_and_preserve_results() {
+        let empty =
+            suggested_line_for(&smell("Chars Count Length Check"), "s.chars().count() == 0")
+                .unwrap();
+        let nonempty =
+            suggested_line_for(&smell("Chars Count Length Check"), "s.chars().count() > 0")
+                .unwrap();
+        let copy = suggested_line_for(&smell("Clone on Copy"), "value.clone()").unwrap();
+        let lifetime = suggested_line_for(
+            &smell("Needless Explicit Lifetime"),
+            "fn identity<'a>(s: &'a str) -> &'a str { s }",
+        )
+        .unwrap();
+        let source = format!(
+            r#"
+fn empty(s: &str) -> bool {{ {empty} }}
+fn nonempty(s: &str) -> bool {{ {nonempty} }}
+fn copy(value: u32) -> u32 {{ {copy} }}
+{lifetime}
+fn main() {{
+    for s in ["", "hello", "é", "😀", "e\u{{301}}"] {{
+        assert_eq!(empty(s), s.chars().count() == 0);
+        assert_eq!(nonempty(s), s.chars().count() > 0);
+        assert_eq!(identity(s), s);
+    }}
+    for value in [0, 1, u32::MAX] {{ assert_eq!(copy(value), value.clone()); }}
+}}
+"#
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("suggestions.rs");
+        let output = dir
+            .path()
+            .join(format!("suggestions{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&input, source).unwrap();
+        let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+        let result = std::process::Command::new(compiler)
+            .arg("--edition=2024")
+            .arg(&input)
+            .arg("-o")
+            .arg(&output)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(
+            std::process::Command::new(output)
+                .status()
+                .unwrap()
+                .success()
         );
     }
 

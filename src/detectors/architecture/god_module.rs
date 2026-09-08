@@ -14,7 +14,7 @@ impl Detector for GodModuleDetector {
         let thresholds = crate::domain::config::current_thresholds();
         let mut smells = Vec::new();
 
-        if file.path.to_string_lossy().contains("tests") {
+        if crate::detectors::policy::is_test_path(&file.path) {
             return smells;
         }
 
@@ -41,7 +41,7 @@ impl Detector for GodModuleDetector {
                 SourceLocation {
                     file: file.path.clone(),
                     line_start: 1,
-                    line_end: file.line_count,
+                    line_end: file.code.lines().count(),
                     column: None,
                 },
                 format!(
@@ -61,7 +61,7 @@ impl Detector for GodModuleDetector {
                 SourceLocation {
                     file: file.path.clone(),
                     line_start: 1,
-                    line_end: file.line_count,
+                    line_end: file.code.lines().count(),
                     column: None,
                 },
                 format!(
@@ -85,12 +85,5 @@ fn is_test_item(item: &syn::Item) -> bool {
         return false;
     };
 
-    module
-        .attrs
-        .iter()
-        .any(|attr| attr.path().is_ident("cfg") && attr.meta.require_list().is_ok_and(is_test_cfg))
-}
-
-fn is_test_cfg(list: &syn::MetaList) -> bool {
-    list.tokens.to_string().contains("test")
+    crate::detectors::policy::has_test_cfg(&module.attrs)
 }

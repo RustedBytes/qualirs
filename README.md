@@ -253,6 +253,8 @@ Policy settings control broad false-positive suppression. Set `skip_tests = fals
 
 Precision controls how much heuristic signal is shown by default. `conservative` reports only high-confidence findings, `balanced` includes medium-confidence structural findings, and `exploratory` includes every detector result. Use `--precision balanced` or `--precision exploratory` to override the config for one run.
 
+Type-sensitive checks use bounded local evidence and respect variable shadowing. Unresolved result types, possible raw-pointer aliasing, nonzero Unicode count comparisons, and the presence of standard locks in async code are exploratory review candidates. Test-only items are filtered before analysis while production-capable cfg branches remain eligible. Suggested replacement code is omitted when semantic equivalence cannot be established.
+
 Each detector emits a stable `QNNNN` code in terminal and JSON output. Add codes to `ignore_findings` to suppress every matching finding, for example `ignore_findings = ["Q0001", "Q0011"]`. Run `qualirs --list-detectors` to see the full code list.
 
 To suppress a single finding inline, put a QualiRS ignore comment on the line immediately before the reported source line:

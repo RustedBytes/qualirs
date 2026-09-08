@@ -360,8 +360,11 @@ impl Engine {
                     }
 
                     let mut smells = Vec::new();
+                    let view =
+                        crate::detectors::policy::analysis_view(&source, &self.config.policy);
+                    let analyzed = view.as_ref().unwrap_or(&source);
                     for detector in &self.detectors {
-                        smells.extend(detector.detect(&source));
+                        smells.extend(detector.detect(analyzed));
                     }
                     smells.retain(|smell| {
                         should_report_smell(&self.config, &ignored_findings, &source, smell)

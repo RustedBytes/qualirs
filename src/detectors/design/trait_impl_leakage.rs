@@ -60,7 +60,7 @@ impl Detector for TraitImplLeakageDetector {
                     SourceLocation {
                         file: file.path.clone(),
                         line_start: 1,
-                        line_end: file.line_count,
+                        line_end: file.code.lines().count(),
                         column: None,
                     },
                     format!(

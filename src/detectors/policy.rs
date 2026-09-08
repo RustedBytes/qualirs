@@ -55,6 +55,9 @@ pub(crate) fn is_dto_template_or_config_struct(item: &syn::ItemStruct) -> bool {
 }
 
 fn attr_is_test_cfg(attr: &syn::Attribute) -> bool {
+    if attr.path().is_ident("test") {
+        return true;
+    }
     if !attr.path().is_ident("cfg") {
         return false;
     }
@@ -62,7 +65,11 @@ fn attr_is_test_cfg(attr: &syn::Attribute) -> bool {
     attr.parse_args_with(
         syn::punctuated::Punctuated::<syn::Meta, syn::token::Comma>::parse_terminated,
     )
-    .is_ok_and(|metas| metas.iter().any(meta_contains_test_cfg))
+    .is_ok_and(|metas| {
+        metas
+            .iter()
+            .any(|meta| cfg_without_test(meta) == Some(false))
+    })
 }
 
 fn path_has_component(path: &Path, names: &[&str]) -> bool {
@@ -98,16 +105,170 @@ fn source_is_macro_heavy(source: &SourceFile) -> bool {
     macro_items * 2 >= item_count
 }
 
-fn meta_contains_test_cfg(meta: &syn::Meta) -> bool {
+// Three-valued evaluation with test=false. Unknown feature/platform predicates
+// must not cause production-capable code to disappear.
+fn cfg_without_test(meta: &syn::Meta) -> Option<bool> {
     match meta {
-        syn::Meta::Path(path) => path.is_ident("test"),
-        syn::Meta::List(list) => list
-            .parse_args_with(
-                syn::punctuated::Punctuated::<syn::Meta, syn::token::Comma>::parse_terminated,
-            )
-            .is_ok_and(|metas| metas.iter().any(meta_contains_test_cfg)),
-        syn::Meta::NameValue(_) => false,
+        syn::Meta::Path(path) if path.is_ident("test") => Some(false),
+        syn::Meta::List(list) => {
+            let metas = list
+                .parse_args_with(
+                    syn::punctuated::Punctuated::<syn::Meta, syn::token::Comma>::parse_terminated,
+                )
+                .ok()?;
+            let values: Vec<_> = metas.iter().map(cfg_without_test).collect();
+            if list.path.is_ident("not") && values.len() == 1 {
+                values[0].map(|v| !v)
+            } else if list.path.is_ident("all") {
+                if values.contains(&Some(false)) {
+                    Some(false)
+                } else if values.iter().all(|v| *v == Some(true)) {
+                    Some(true)
+                } else {
+                    None
+                }
+            } else if list.path.is_ident("any") {
+                if values.contains(&Some(true)) {
+                    Some(true)
+                } else if values.iter().all(|v| *v == Some(false)) {
+                    Some(false)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        _ => None,
     }
+}
+
+/// Mask excluded items before parsing a detector view, keeping character columns
+/// and line numbers intact for diagnostics and ignore directives.
+pub(crate) fn analysis_view(source: &SourceFile, policy: &PolicyConfig) -> Option<SourceFile> {
+    use syn::{spanned::Spanned, visit::Visit};
+    if !policy.skip_tests {
+        return None;
+    }
+    struct Excluded(Vec<proc_macro2::Span>);
+    impl<'a> Visit<'a> for Excluded {
+        fn visit_stmt(&mut self, stmt: &'a syn::Stmt) {
+            let attrs: &[syn::Attribute] = match stmt {
+                syn::Stmt::Local(l) => &l.attrs,
+                syn::Stmt::Expr(e, _) => match e {
+                    syn::Expr::Call(e) => &e.attrs,
+                    syn::Expr::MethodCall(e) => &e.attrs,
+                    syn::Expr::Block(e) => &e.attrs,
+                    syn::Expr::Unsafe(e) => &e.attrs,
+                    syn::Expr::Async(e) => &e.attrs,
+                    syn::Expr::Await(e) => &e.attrs,
+                    syn::Expr::If(e) => &e.attrs,
+                    syn::Expr::Match(e) => &e.attrs,
+                    syn::Expr::ForLoop(e) => &e.attrs,
+                    syn::Expr::While(e) => &e.attrs,
+                    syn::Expr::Loop(e) => &e.attrs,
+                    syn::Expr::Macro(e) => &e.attrs,
+                    _ => &[],
+                },
+                syn::Stmt::Macro(m) => &m.attrs,
+                _ => &[],
+            };
+            if attrs.iter().any(attr_is_test_cfg) {
+                self.0.push(stmt.span());
+            } else {
+                syn::visit::visit_stmt(self, stmt);
+            }
+        }
+        fn visit_item(&mut self, item: &'a syn::Item) {
+            let attrs: &[syn::Attribute] = match item {
+                syn::Item::Fn(i) => &i.attrs,
+                syn::Item::Mod(i) => &i.attrs,
+                syn::Item::Struct(i) => &i.attrs,
+                syn::Item::Enum(i) => &i.attrs,
+                syn::Item::Impl(i) => &i.attrs,
+                syn::Item::Trait(i) => &i.attrs,
+                syn::Item::Use(i) => &i.attrs,
+                syn::Item::Const(i) => &i.attrs,
+                syn::Item::Static(i) => &i.attrs,
+                syn::Item::Type(i) => &i.attrs,
+                syn::Item::Macro(i) => &i.attrs,
+                syn::Item::ForeignMod(i) => &i.attrs,
+                syn::Item::Union(i) => &i.attrs,
+                _ => &[],
+            };
+            if attrs.iter().any(attr_is_test_cfg) {
+                self.0.push(item.span());
+            } else {
+                syn::visit::visit_item(self, item);
+            }
+        }
+        fn visit_impl_item(&mut self, item: &'a syn::ImplItem) {
+            let attrs: &[syn::Attribute] = match item {
+                syn::ImplItem::Fn(i) => &i.attrs,
+                syn::ImplItem::Const(i) => &i.attrs,
+                syn::ImplItem::Type(i) => &i.attrs,
+                _ => &[],
+            };
+            if attrs.iter().any(attr_is_test_cfg) {
+                self.0.push(item.span());
+            } else {
+                syn::visit::visit_impl_item(self, item);
+            }
+        }
+        fn visit_trait_item(&mut self, item: &'a syn::TraitItem) {
+            let attrs: &[syn::Attribute] = match item {
+                syn::TraitItem::Fn(i) => &i.attrs,
+                syn::TraitItem::Const(i) => &i.attrs,
+                syn::TraitItem::Type(i) => &i.attrs,
+                _ => &[],
+            };
+            if attrs.iter().any(attr_is_test_cfg) {
+                self.0.push(item.span());
+            } else {
+                syn::visit::visit_trait_item(self, item);
+            }
+        }
+    }
+    let mut excluded = Excluded(Vec::new());
+    if source.ast.attrs.iter().any(attr_is_test_cfg) {
+        excluded.0.push(source.ast.span());
+    } else {
+        excluded.visit_file(&source.ast);
+    }
+    if excluded.0.is_empty() {
+        return None;
+    }
+    let mut chars: Vec<char> = source.code.chars().collect();
+    let offset = |loc: proc_macro2::LineColumn| {
+        let start: usize = source
+            .code
+            .split_inclusive('\n')
+            .take(loc.line.saturating_sub(1))
+            .map(|line| line.chars().count())
+            .sum();
+        start + loc.column
+    };
+    let mut removed_lines = std::collections::HashSet::new();
+    for span in excluded.0 {
+        for line in span.start().line..=span.end().line {
+            removed_lines.insert(line);
+        }
+        for ch in &mut chars[offset(span.start())..offset(span.end())] {
+            if !matches!(*ch, '\n' | '\r') {
+                *ch = ' ';
+            }
+        }
+    }
+    let mut view = SourceFile::from_source(source.path.clone(), chars.into_iter().collect())
+        .expect("removing cfg items preserves Rust syntax");
+    let excluded_count = view
+        .code
+        .lines()
+        .enumerate()
+        .filter(|(i, line)| removed_lines.contains(&(i + 1)) && line.trim().is_empty())
+        .count();
+    view.line_count = source.line_count.saturating_sub(excluded_count);
+    Some(view)
 }
 
 fn has_template_attr(item: &syn::ItemStruct) -> bool {

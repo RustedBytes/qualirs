@@ -43,17 +43,24 @@ struct DuplicateArmVisitor {
 
 impl<'ast> Visit<'ast> for DuplicateArmVisitor {
     fn visit_expr_match(&mut self, node: &'ast syn::ExprMatch) {
-        let mut seen = std::collections::HashSet::new();
+        let mut previous = None;
         for arm in &node.arms {
-            if body_uses_pattern_binding(&arm.pat, &arm.body) {
+            // Binding patterns can require different types/modes even if the
+            // body does not reference them. Guarded arms also depend on order.
+            if !pattern_bindings(&arm.pat).is_empty()
+                || matches!(arm.pat, syn::Pat::Guard(_))
+                || body_uses_pattern_binding(&arm.pat, &arm.body)
+            {
+                previous = None;
                 continue;
             }
             let body = normalized_body(&arm.body);
-            if body.len() > 3 && !seen.insert(body) {
+            if body.len() > 3 && previous.as_ref() == Some(&body) {
                 self.findings
                     .push(arm.fat_arrow_token.spans[0].start().line);
                 break;
             }
+            previous = Some(body);
         }
         visit_expr_match(self, node);
     }
@@ -150,5 +157,7 @@ fn normalized_body(body: &syn::Expr) -> String {
 }
 
 fn normalize(value: &str) -> String {
-    value.split_whitespace().collect::<String>()
+    // TokenStream formatting normalizes token spacing already. Whitespace
+    // inside a string literal is semantic and must never be removed.
+    value.to_string()
 }

@@ -1,150 +1,120 @@
-use quote::ToTokens;
-
-use crate::analysis::detector::Detector;
-use crate::domain::smell::{Severity, Smell, SmellCategory, SourceLocation};
-use crate::domain::source::SourceFile;
-
-/// Detects impls that are often better expressed with derive.
+use crate::analysis::{detector::Detector, evidence::Context};
+use crate::domain::{
+    smell::{FindingConfidence, Severity, Smell, SmellCategory, SourceLocation},
+    source::SourceFile,
+};
 pub struct DerivableImplDetector;
-
 impl Detector for DerivableImplDetector {
     fn name(&self) -> &str {
         "Derivable Impl"
     }
-
     fn detect(&self, file: &SourceFile) -> Vec<Smell> {
-        let mut smells = Vec::new();
-
+        let ctx = Context::new(&file.ast.items);
+        let mut findings = Vec::new();
         for item in &file.ast.items {
-            if let syn::Item::Impl(imp) = item
-                && let Some((trait_path, _)) = &imp.trait_
-                && let Some(trait_ident) = trait_path.segments.last().map(|seg| &seg.ident)
+            let syn::Item::Impl(imp) = item else {
+                continue;
+            };
+            if !imp.generics.params.is_empty()
+                || imp.generics.where_clause.is_some()
+                || !imp.attrs.is_empty()
             {
-                if !is_derivable_trait(trait_ident)
-                    || !is_low_risk_derivable_candidate(imp, trait_ident)
-                {
-                    continue;
-                }
-                if trait_ident == "Default" && !is_derived_equivalent_default_impl(imp) {
-                    continue;
-                }
+                continue;
+            }
+            let Some((trait_path, _)) = &imp.trait_ else {
+                continue;
+            };
+            let trait_name = ctx.path(trait_path);
+            let standard = match trait_name.as_str() {
+                "Default" | "std::default::Default" | "core::default::Default" => "Default",
+                "Clone" | "std::clone::Clone" | "core::clone::Clone" => "Clone",
+                "Eq" | "std::cmp::Eq" | "core::cmp::Eq" => "Eq",
+                _ => continue,
+            };
+            let syn::Type::Path(self_ty) = &*imp.self_ty else {
+                continue;
+            };
+            let Some(name) = self_ty.path.get_ident() else {
+                continue;
+            };
+            let Some(strukt) = file.ast.items.iter().find_map(|i| match i {
+                syn::Item::Struct(s) if s.ident == *name => Some(s),
+                _ => None,
+            }) else {
+                continue;
+            };
+            if !strukt.generics.params.is_empty()
+                || strukt.generics.where_clause.is_some()
+                || strukt
+                    .attrs
+                    .iter()
+                    .any(|a| a.path().is_ident("cfg") || a.path().is_ident("cfg_attr"))
+                || strukt.fields.iter().any(|f| !f.attrs.is_empty())
+            {
+                continue;
+            }
+            let equivalent = if standard == "Eq" {
+                imp.items.is_empty()
+            } else {
+                fieldwise(imp, strukt, standard, &ctx)
+            };
+            if equivalent {
                 let line = imp.impl_token.span.start().line;
-                smells.push(derivable_impl_smell(file, trait_ident, line));
+                findings.push(Smell::new(SmellCategory::Idiomaticity, self.name(), Severity::Info, FindingConfidence::High,
+ SourceLocation::new(file.path.clone(), line, line, None),
+ format!("Manual {standard} implementation is equivalent to a derive for this nongeneric struct"),
+ format!("Use #[derive({standard})] on the struct.")));
             }
         }
-
-        smells
+        findings
     }
 }
-
-fn is_derivable_trait(ident: &syn::Ident) -> bool {
-    ident == "Debug"
-        || ident == "Clone"
-        || ident == "Default"
-        || ident == "PartialEq"
-        || ident == "Eq"
-        || ident == "Hash"
-}
-
-fn is_low_risk_derivable_candidate(imp: &syn::ItemImpl, trait_ident: &syn::Ident) -> bool {
-    if trait_ident == "Default" {
-        return imp.items.len() <= 2;
-    }
-
-    if !imp.generics.params.is_empty() || imp.generics.where_clause.is_some() {
-        return false;
-    }
-
-    if imp.to_token_stream().to_string().contains("# [cfg") {
-        return false;
-    }
-
-    match trait_ident.to_string().as_str() {
-        "Eq" => imp.items.is_empty(),
-        "Debug" => has_single_method_named(imp, "fmt"),
-        "Clone" => has_single_method_named(imp, "clone"),
-        "PartialEq" => has_single_method_named(imp, "eq"),
-        "Hash" => has_single_method_named(imp, "hash"),
-        _ => false,
-    }
-}
-
-fn has_single_method_named(imp: &syn::ItemImpl, method_name: &str) -> bool {
-    matches!(
-        imp.items.as_slice(),
-        [syn::ImplItem::Fn(method)] if method.sig.ident == method_name
-    )
-}
-
-fn derivable_impl_smell(file: &SourceFile, trait_ident: &syn::Ident, line: usize) -> Smell {
-    Smell::new(
-        SmellCategory::Idiomaticity,
-        "Derivable Impl",
-        Severity::Info,
-        crate::domain::smell::FindingConfidence::High,
-        SourceLocation::new(file.path.clone(), line, line, None),
-        format!("Manual `{trait_ident}` impl may be derivable"),
-        "Prefer #[derive(...)] when the implementation is mechanical.",
-    )
-}
-
-fn is_derived_equivalent_default_impl(imp: &syn::ItemImpl) -> bool {
-    imp.items.iter().any(|item| {
-        let syn::ImplItem::Fn(func) = item else {
-            return false;
-        };
-        func.sig.ident == "default"
-            && func.sig.inputs.is_empty()
-            && returns_self(&func.sig.output)
-            && single_tail_expr(&func.block).is_some_and(is_defaultish_expr)
-    })
-}
-
-fn returns_self(output: &syn::ReturnType) -> bool {
-    matches!(output, syn::ReturnType::Type(_, ty) if matches!(&**ty, syn::Type::Path(path) if path.path.is_ident("Self")))
-}
-
-fn single_tail_expr(block: &syn::Block) -> Option<&syn::Expr> {
-    match block.stmts.as_slice() {
-        [syn::Stmt::Expr(expr, None)] => Some(expr),
-        _ => None,
-    }
-}
-
-fn is_defaultish_expr(expr: &syn::Expr) -> bool {
-    match expr {
-        syn::Expr::Call(call) => is_default_call(&call.func),
-        syn::Expr::Struct(strukt) => {
-            strukt.path.is_ident("Self")
-                && !strukt.fields.is_empty()
-                && strukt
-                    .fields
-                    .iter()
-                    .all(|field| is_defaultish_expr(&field.expr))
-        }
-        _ => false,
-    }
-}
-
-fn is_default_call(func: &syn::Expr) -> bool {
-    let syn::Expr::Path(path) = func else {
+fn fieldwise(imp: &syn::ItemImpl, strukt: &syn::ItemStruct, standard: &str, ctx: &Context) -> bool {
+    let [syn::ImplItem::Fn(f)] = imp.items.as_slice() else {
         return false;
     };
-    let mut segments = path
-        .path
-        .segments
-        .iter()
-        .map(|segment| segment.ident.to_string());
-    matches!(
-        (
-            segments.next().as_deref(),
-            segments.next().as_deref(),
-            segments.next()
-        ),
-        (
-            Some("Default" | "Self" | "String" | "Vec"),
-            Some("default" | "new"),
-            None
-        )
-    )
+    if !f.attrs.is_empty()
+        || !f.sig.generics.params.is_empty()
+        || f.sig.generics.where_clause.is_some()
+    {
+        return false;
+    }
+    if standard == "Default" && (f.sig.ident != "default" || !f.sig.inputs.is_empty())
+        || standard == "Clone" && (f.sig.ident != "clone" || f.sig.inputs.len() != 1)
+    {
+        return false;
+    }
+    if !matches!(&f.sig.output, syn::ReturnType::Type(_, ty) if matches!(&**ty, syn::Type::Path(p) if p.path.is_ident("Self")))
+    {
+        return false;
+    }
+    let [syn::Stmt::Expr(syn::Expr::Struct(body), None)] = f.block.stmts.as_slice() else {
+        return false;
+    };
+    if !(body.path.is_ident("Self") || body.path.is_ident(&strukt.ident.to_string()))
+        || body.rest.is_some()
+        || body.fields.len() != strukt.fields.len()
+    {
+        return false;
+    }
+    let syn::Fields::Named(fields) = &strukt.fields else {
+        return false;
+    };
+    fields.named.iter().all(|field| {
+ let Some(name) = &field.ident else { return false; };
+ let Some(value) = body.fields.iter().find(|v| matches!(&v.member, syn::Member::Named(n) if n == name)) else { return false; };
+ if standard == "Clone" {
+ matches!(&value.expr, syn::Expr::MethodCall(c) if c.method == "clone" && c.args.is_empty()
+ && matches!(&*c.receiver, syn::Expr::Field(f) if matches!(&f.member, syn::Member::Named(n) if n == name)
+ && matches!(&*f.base, syn::Expr::Path(p) if p.path.is_ident("self"))))
+ } else {
+ let syn::Expr::Call(c) = &value.expr else { return false; };
+ if !c.args.is_empty() { return false; }
+ let syn::Expr::Path(p) = &*c.func else { return false; };
+ let path = ctx.path(&p.path);
+ matches!(path.as_str(), "Default::default" | "std::default::Default::default" | "core::default::Default::default")
+ || matches!(ctx.kind(&field.ty), crate::analysis::evidence::Kind::String) && matches!(path.as_str(), "String::new" | "std::string::String::new")
+ || matches!(ctx.kind(&field.ty), crate::analysis::evidence::Kind::Vec) && matches!(path.as_str(), "Vec::new" | "std::vec::Vec::new")
+ }
+ })
 }

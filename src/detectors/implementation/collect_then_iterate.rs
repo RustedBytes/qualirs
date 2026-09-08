@@ -1,57 +1,53 @@
-use syn::visit::{Visit, visit_expr_method_call};
-
-use crate::analysis::detector::Detector;
-use crate::domain::smell::{Severity, Smell, SmellCategory, SourceLocation};
-use crate::domain::source::SourceFile;
-
-/// Detects iterator chains that collect only to immediately iterate again.
+use crate::analysis::{
+    detector::Detector,
+    evidence::{self, Kind},
+};
+use crate::domain::{
+    smell::{FindingConfidence, Severity, Smell, SmellCategory, SourceLocation},
+    source::SourceFile,
+};
+use syn::spanned::Spanned;
 pub struct CollectThenIterateDetector;
-
 impl Detector for CollectThenIterateDetector {
     fn name(&self) -> &str {
         "Collect Then Iterate"
     }
-
     fn detect(&self, file: &SourceFile) -> Vec<Smell> {
-        let mut visitor = CollectThenIterateVisitor {
-            findings: Vec::new(),
-        };
-        visitor.visit_file(&file.ast);
-
-        visitor
-            .findings
-            .into_iter()
-            .map(|line| {
-                Smell::new(
-                    SmellCategory::Performance,
-                    "Collect Then Iterate",
-                    Severity::Info,
-                    crate::domain::smell::FindingConfidence::High,
-                    SourceLocation::new(file.path.clone(), line, line, None),
-                    "Iterator chain collects into a Vec and immediately iterates or queries it",
-                    "Keep the chain lazy, or collect once and reuse the collection meaningfully.",
-                )
-            })
-            .collect()
+        let mut findings = Vec::new();
+        evidence::inspect(&file.ast, |expr, ctx| {
+            let syn::Expr::MethodCall(query) = expr else {
+                return;
+            };
+            if !matches!(
+                query.method.to_string().as_str(),
+                "iter" | "into_iter" | "len" | "is_empty"
+            ) || !query.args.is_empty()
+            {
+                return;
+            }
+            let syn::Expr::MethodCall(collect) = &*query.receiver else {
+                return;
+            };
+            if collect.method != "collect" {
+                return;
+            }
+            let Some(args) = &collect.turbofish else {
+                return;
+            };
+            let Some(syn::GenericArgument::Type(ty)) = args.args.first() else {
+                return;
+            };
+            if ctx.kind(ty) != Kind::Vec {
+                return;
+            }
+            let established_iterator = matches!(&*collect.receiver, syn::Expr::MethodCall(c)
+ if matches!(c.method.to_string().as_str(), "iter" | "into_iter") && *ctx.expr(&c.receiver).value() == Kind::Vec);
+            findings.push(Smell::new(SmellCategory::Performance, self.name(), Severity::Info,
+ if established_iterator { FindingConfidence::High } else { FindingConfidence::Low },
+ SourceLocation::new(file.path.clone(), expr.span().start().line, expr.span().end().line, None),
+ "An explicit Vec collection is immediately iterated or queried",
+ "Consider removing the intermediate Vec only if ownership, evaluation order, and iterator side effects remain equivalent."));
+        });
+        findings
     }
-}
-
-struct CollectThenIterateVisitor {
-    findings: Vec<usize>,
-}
-
-impl<'ast> Visit<'ast> for CollectThenIterateVisitor {
-    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
-        let method = node.method.to_string();
-        if matches!(method.as_str(), "iter" | "into_iter" | "len" | "is_empty")
-            && is_collect_call(&node.receiver)
-        {
-            self.findings.push(node.method.span().start().line);
-        }
-        visit_expr_method_call(self, node);
-    }
-}
-
-fn is_collect_call(expr: &syn::Expr) -> bool {
-    matches!(expr, syn::Expr::MethodCall(call) if call.method == "collect")
 }

@@ -1,94 +1,72 @@
-use quote::ToTokens;
-
 use crate::analysis::detector::Detector;
-use crate::domain::smell::{Severity, Smell, SmellCategory, SourceLocation};
-use crate::domain::source::SourceFile;
-
-/// Detects simple function signatures where a named lifetime can be elided.
+use crate::domain::{
+    smell::{FindingConfidence, Severity, Smell, SmellCategory, SourceLocation},
+    source::SourceFile,
+};
+use syn::visit::Visit;
 pub struct NeedlessExplicitLifetimeDetector;
-
 impl Detector for NeedlessExplicitLifetimeDetector {
     fn name(&self) -> &str {
         "Needless Explicit Lifetime"
     }
-
     fn detect(&self, file: &SourceFile) -> Vec<Smell> {
-        let mut smells = Vec::new();
-
-        for item in &file.ast.items {
-            if let syn::Item::Fn(func) = item
-                && func.sig.generics.lifetimes().count() == 1
-                && has_one_reference_input(&func.sig.inputs)
-                && !lifetime_used_in_bounds(&func.sig.generics)
-            {
-                let line = func.sig.fn_token.span.start().line;
-                smells.push(Smell::new(
-                        SmellCategory::Idiomaticity,
-                        "Needless Explicit Lifetime",
-                        Severity::Info,
-                                                crate::domain::smell::FindingConfidence::High,
-                        SourceLocation::new(file.path.clone(), line, line, None),
-                        format!("Function `{}` appears to use an elidable explicit lifetime", func.sig.ident),
-                        "Remove the named lifetime when lifetime elision rules can express the signature.",
-                    ));
-            }
-        }
-
-        smells
+        file.ast.items.iter().filter_map(|item| {
+ let syn::Item::Fn(f) = item else { return None; };
+ if !elidable(f) { return None; }
+ let line = f.sig.fn_token.span.start().line;
+ Some(Smell::new(SmellCategory::Idiomaticity, self.name(), Severity::Info, FindingConfidence::High,
+ SourceLocation::new(file.path.clone(), line, line, None),
+ "The sole unbounded lifetime only relates a simple input reference to its output",
+ "Use Rust's input/output lifetime elision."))
+ }).collect()
     }
 }
-
-fn lifetime_used_in_bounds(generics: &syn::Generics) -> bool {
-    let Some(lifetime) = generics.lifetimes().next() else {
+pub(crate) fn elidable(f: &syn::ItemFn) -> bool {
+    let sig = &f.sig;
+    if sig.generics.params.len() != 1
+        || sig.generics.where_clause.is_some()
+        || sig.inputs.len() != 1
+    {
+        return false;
+    }
+    let Some(syn::GenericParam::Lifetime(lt)) = sig.generics.params.first() else {
         return false;
     };
-    let lifetime = lifetime.lifetime.ident.to_string();
-    let lifetime_token = format!("'{}", lifetime);
-
-    generics.params.iter().any(|param| {
-        match param {
-            syn::GenericParam::Lifetime(param) => param
-                .bounds
-                .iter()
-                .any(|bound| bound.ident == lifetime),
-            syn::GenericParam::Type(param) => param.bounds.iter().any(|bound| {
-                matches!(bound, syn::TypeParamBound::Lifetime(bound) if bound.ident == lifetime)
-            }),
-            syn::GenericParam::Const(_) => false,
+    if !lt.bounds.is_empty() {
+        return false;
+    }
+    let Some(syn::FnArg::Typed(arg)) = sig.inputs.first() else {
+        return false;
+    };
+    let syn::Type::Reference(input) = &*arg.ty else {
+        return false;
+    };
+    if input.lifetime.as_ref() != Some(&lt.lifetime) || !simple_type(&input.elem) {
+        return false;
+    }
+    if let syn::ReturnType::Type(_, output) = &sig.output {
+        match &**output {
+            syn::Type::Reference(r)
+                if r.lifetime.as_ref() == Some(&lt.lifetime) && simple_type(&r.elem) => {}
+            t if simple_type(t) => {}
+            _ => return false,
         }
-    }) || generics.where_clause.as_ref().is_some_and(|where_clause| {
-        if where_clause
-            .to_token_stream()
+    }
+    struct Lifetimes(bool);
+    impl<'a> Visit<'a> for Lifetimes {
+        fn visit_lifetime(&mut self, _: &'a syn::Lifetime) {
+            self.0 = true;
+        }
+    }
+    let mut body = Lifetimes(false);
+    body.visit_block(&f.block);
+    // Macro tokens can also depend on the explicit lifetime.
+    !body.0
+        && !quote::ToTokens::to_token_stream(&f.block)
             .to_string()
-            .contains(&lifetime_token)
-        {
-            return true;
-        }
-
-        where_clause.predicates.iter().any(|predicate| {
-            match predicate {
-                syn::WherePredicate::Lifetime(predicate) => {
-                    predicate.lifetime.ident == lifetime
-                        || predicate
-                            .bounds
-                            .iter()
-                            .any(|bound| bound.ident == lifetime)
-                }
-                syn::WherePredicate::Type(predicate) => predicate.bounds.iter().any(|bound| {
-                    matches!(bound, syn::TypeParamBound::Lifetime(bound) if bound.ident == lifetime)
-                }),
-                _ => false,
-            }
-        })
-    })
+            .contains(&format!("'{}", lt.lifetime.ident))
 }
-
-fn has_one_reference_input(
-    inputs: &syn::punctuated::Punctuated<syn::FnArg, syn::token::Comma>,
-) -> bool {
-    inputs
-        .iter()
-        .filter(|input| matches!(input, syn::FnArg::Typed(pat_ty) if matches!(&*pat_ty.ty, syn::Type::Reference(_))))
-        .count()
-        == 1
+fn simple_type(ty: &syn::Type) -> bool {
+    matches!(ty, syn::Type::Path(p) if p.qself.is_none() && p.path.segments.iter().all(|s| matches!(s.arguments, syn::PathArguments::None)))
+        || matches!(ty, syn::Type::Tuple(t) if t.elems.is_empty())
 }

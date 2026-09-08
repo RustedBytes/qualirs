@@ -1933,8 +1933,8 @@ mod holding_lock_across_await {
     #[test]
     fn detects_bound_guard_held_across_later_await() {
         let code = r#"
-async fn foo(lock: &tokio::sync::Mutex<i32>) {
-    let guard = lock.lock().await;
+async fn foo(lock: &std::sync::Mutex<i32>) {
+    let guard = lock.lock().unwrap();
     do_work().await;
     drop(guard);
 }
@@ -3696,9 +3696,9 @@ mod multi_mut_ref_unsafe {
     fn detects_multiple_mut_ref() {
         // Reports one smell per instance when threshold (>=2) is met
         let code = "\
-fn foo(a: &mut i32, b: &mut i32) {
-    let x = &mut *a;
-    let y = &mut *b;
+unsafe fn foo(p: *mut i32) {
+    let x = &mut *p;
+    let y = &mut *p;
 }
 ";
         assert_smell_count(&DETECTOR, code, "Multi Mut Ref Unsafe", 2);

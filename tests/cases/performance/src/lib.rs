@@ -185,7 +185,12 @@ fn allocate_in_loop(items: Vec<i32>) {
 }
 
 fn collect_then_iterate(items: Vec<i32>) {
-    items.iter().map(|item| item + 1).collect::<Vec<_>>().iter().for_each(|item| consume(item));
+    items
+        .iter()
+        .map(|item| item + 1)
+        .collect::<Vec<_>>()
+        .iter()
+        .for_each(|item| consume(item));
 }
 
 fn regex_in_loop(values: Vec<&str>) {
@@ -228,7 +233,7 @@ fn sort_for_min(mut values: Vec<i32>) -> Option<i32> {
 }
 
 fn full_sort_for_first(mut values: Vec<i32>) -> Option<i32> {
-    values.sort_by_key(|value| *value);
+    values.sort_unstable();
     values.get(1).copied()
 }
 

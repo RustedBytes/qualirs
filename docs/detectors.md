@@ -2,6 +2,12 @@
 
 This document explains every built-in QualiRS detector. Each entry gives the intent of the rule plus a small bad and good example. The examples are intentionally short; real findings usually involve larger code around the highlighted pattern.
 
+QualiRS uses bounded source analysis, not compiler type checking. The rules described below use local type annotations, simple aliases, imports, and lexical bindings where applicable. Unknown receivers and unresolved semantics do not establish high confidence. Conservative mode includes high-confidence findings; balanced also includes medium; exploratory includes low-confidence review candidates. A finding is a review aid, not proof that a program is incorrect.
+
+Test-only items and statements are excluded centrally when `skip_tests = true`, while preserving diagnostic locations. Conditions such as `not(test)` and `any(test, feature = "x")` remain eligible for production analysis. Setting `skip_tests = false` includes test code.
+
+Generated replacement snippets are limited to unambiguous high-confidence transformations. Unicode character counts are never blindly replaced with byte lengths. When equivalence cannot be established, QualiRS gives prose guidance without replacement code.
+
 ## Architecture
 
 Architecture smells point to module, crate, dependency, and public API structure that will make a project harder to evolve.
@@ -62,7 +68,7 @@ Implementation smells flag local complexity and maintainability issues inside fu
 | Q0038 | Unsafe Block Overuse | A file or function contains too many unsafe blocks. | Many small `unsafe { ... }` regions mixed through logic | Isolate unsafe code in one audited abstraction |
 | Q0039 | Lifetime Explosion | Signatures carry many explicit lifetimes. | `fn merge<'a, 'b, 'c, 'd>(...) -> ...` | Use owned types, structs, or elided lifetimes where possible |
 | Q0040 | Deeply Nested Type | Type signatures are nested enough to be hard to read. | `Option<Result<Vec<Box<dyn Fn()>>, Error>>` | Introduce `type HandlerList = Vec<Box<dyn Fn()>>;` |
-| Q0041 | Duplicate Match Arms | Multiple match arms perform the same work. | `A => handle(), B => handle(), C => other()` | `A \| B => handle(), C => other()` |
+| Q0041 | Duplicate Match Arms | Adjacent compatible arms repeat the same token structure, preserving literal contents. | `1 => work(), 2 => work()` | `1 \| 2 => work()`; retain distinct guards and bindings |
 | Q0042 | Long Closure | A closure contains too much logic. | `iter.map(\|item\| { validate; transform; log; persist; item })` | Move the body into `fn transform_item(item: Item) -> Item` |
 | Q0043 | Deep Closure Nesting | Closures are nested inside closures repeatedly. | `a.map(\|x\| b.map(\|y\| c.map(\|z\| ...)))` | Use named functions or straightforward loops |
 
@@ -78,21 +84,21 @@ Performance smells highlight allocation, copying, locking, and iteration pattern
 | Q0047 | Async Trait Overhead | Async trait methods may allocate or dispatch unnecessarily. | `#[async_trait] trait Repo { async fn get(&self); }` in hot paths | Use native async traits where available or concrete async functions |
 | Q0048 | Interior Mutability Abuse | `RefCell`, `Cell`, or mutex-like wrappers appear where ownership would suffice. | `struct Counter { value: RefCell<u64> }` | `struct Counter { value: u64 }` with `&mut self` methods |
 | Q0049 | Unnecessary Allocation in Loop | A loop allocates new owned values each iteration unnecessarily. | `for x in xs { let s = x.to_string(); use_it(&s); }` | Reuse a buffer or pass borrowed data |
-| Q0050 | Collect Then Iterate | Code collects into a temporary collection only to iterate once. | `items.map(f).collect::<Vec<_>>().iter().for_each(g)` | `items.map(f).for_each(g)` |
+| Q0050 | Collect Then Iterate | An explicit Vec is immediately queried or iterated; unknown iterators are exploratory. | `v.into_iter().collect::<Vec<_>>().len()` | Use the original iterator when evaluation and ownership stay equivalent; preserve sets/maps |
 | Q0051 | Repeated Regex Construction | Regexes are compiled repeatedly. | `for s in lines { Regex::new(PAT).unwrap().is_match(s); }` | `static RE: LazyLock<Regex> = ...;` |
 | Q0052 | Missing Collection Preallocation | Code pushes many items without reserving capacity. | `let mut out = Vec::new(); for x in xs { out.push(f(x)); }` | `let mut out = Vec::with_capacity(xs.len());` |
 | Q0053 | Repeated String Conversion in Hot Path | Strings are converted repeatedly in loops or chains. | `for id in ids { lookup(id.to_string()); }` | Accept `&str` or convert once outside the hot path |
 | Q0054 | Needless Intermediate String Formatting | Formatting creates a temporary string only to pass it on. | `log(format!("id={id}").as_str())` | `write!(buf, "id={id}")` or pass format args directly |
-| Q0055 | Vec Contains in Loop | Linear `Vec::contains` lookup repeats inside a loop. | `for id in ids { if allowed.contains(id) { ... } }` | `let allowed: HashSet<_> = allowed.into_iter().collect();` |
-| Q0056 | Sort Before Min or Max | A full sort is used to get only min or max. | `xs.sort(); xs.first()` | `xs.iter().min()` |
-| Q0057 | Full Sort for Single Element | A full sort is used to get one ranked element. | `xs.sort_by_key(score); xs[0]` | `xs.iter().min_by_key(score)` or `select_nth_unstable_by_key` |
-| Q0058 | Clone Before Move Into Collection | A value is cloned immediately before insertion where a move would work. | `items.push(value.clone()); drop(value);` | `items.push(value);` |
+| Q0055 | Vec Contains in Loop | A locally established Vec performs repeated linear membership checks in a loop. | `fn check(v: Vec<u32>) { for x in ids { v.contains(&x); } }` | Consider a set when lookup cost dominates; small ordered vectors may be appropriate |
+| Q0056 | Sort Before Min or Max | An owned local Vec is sorted directly before its only extremum selection, with no earlier aliases or later uses. | `v.sort(); v.first().copied()` | `v.iter().min().copied()` when the full order is unused |
+| Q0057 | Full Sort for Single Element | A plain sort of an owned local Vec is only used to select one rank. | `v.sort_unstable(); v[1]` | Consider `select_nth_unstable`; retain sorting if order or comparator effects are required |
+| Q0058 | Clone Before Move Into Collection | An established owned String or Vec is cloned into a Vec on its final local use, without earlier aliases. | `fn store(value: String, out: &mut Vec<String>) { out.push(value.clone()); }` | `out.push(value);` |
 | Q0059 | Inefficient Iterator Step | Iterator adapters use an indirect form for one step. | `iter.nth(0)` or `iter.skip(n).next()` | `iter.next()` or `iter.nth(n)` |
-| Q0060 | Chars Count Length Check | Character counting is used where byte length is enough. | `if s.chars().count() == 0 { ... }` | `if s.is_empty() { ... }` |
+| Q0060 | Chars Count Length Check | Proven emptiness checks count characters unnecessarily. Other character-count comparisons are exploratory. | `s.chars().count() == 0` | `s.is_empty()`; byte length cannot replace a Unicode scalar count |
 | Q0061 | Repeated Expensive Construction in Loop | Expensive objects are rebuilt on every iteration. | `for item in items { let client = Client::new(); ... }` | Construct `client` once before the loop |
 | Q0062 | Needless Dynamic Dispatch | `dyn Trait` is used where static dispatch would be simpler or faster. | `fn run(job: Box<dyn Job>)` for one concrete type | `fn run<J: Job>(job: J)` or accept the concrete type |
 | Q0063 | Local Lock in Single-Threaded Scope | A lock protects data that is only used locally. | `let value = Mutex::new(0); *value.lock().unwrap() += 1;` | `let mut value = 0; value += 1;` |
-| Q0064 | Clone on Copy | Calling `.clone()` on a `Copy` value is redundant. | `let n = count.clone();` | `let n = count;` |
+| Q0064 | Clone on Copy | A primitive Copy value established in the current lexical scope is cloned. | `let count: u32 = 1; count.clone()` | `count`; shadowed values and unrelated fields are analyzed separately |
 | Q0065 | Large Value Passed By Value | Large values are passed by value when borrowing would avoid copies or moves. | `fn analyze(report: BigReport)` | `fn analyze(report: &BigReport)` |
 | Q0066 | Inline Candidate | Tiny wrappers or single-use functions add call overhead and indirection. | `fn is_empty(s: &str) -> bool { s.is_empty() }` used once | Inline the expression or mark a widely used tiny function appropriately |
 
@@ -103,7 +109,7 @@ Idiomaticity smells find code that works but fights common Rust patterns or make
 | Code | Item | What it catches | Bad example | Good example |
 |---|---|---|---|---|
 | Q0067 | Excessive Unwrap | Frequent `unwrap` or `expect` calls in production paths. | `read_config().unwrap().parse().unwrap()` | `let cfg = read_config()?; let parsed = cfg.parse()?;` |
-| Q0068 | Unused Result Ignored | A `Result` is ignored instead of handled. | `file.write_all(bytes);` | `file.write_all(bytes)?;` |
+| Q0068 | Unused Result Ignored | A Result is explicitly discarded with `let _ =`; unresolved result-like calls are exploratory. | `let _ = std::fs::write(path, bytes);` | Handle the error or propagate with `?`; already handled/unit-returning expressions are excluded |
 | Q0069 | Panic in Library | Library code calls panic-like macros for recoverable errors. | `panic!("invalid input")` in a public library function | `return Err(Error::InvalidInput)` |
 | Q0070 | Copy + Drop Conflict | A type combines `Copy` semantics with custom destruction expectations. | `#[derive(Copy, Clone)] struct Handle(RawFd); impl Drop for Handle { ... }` | Remove `Copy`; use move-only ownership for resources |
 | Q0071 | Deref Abuse | `Deref` is implemented for domain behavior instead of pointer-like access. | `impl Deref<Target = Config> for App` | Add explicit `app.config()` accessors |
@@ -111,8 +117,8 @@ Idiomaticity smells find code that works but fights common Rust patterns or make
 | Q0073 | Manual Default Constructor | A no-argument `new` duplicates `Default`. | `impl Settings { fn new() -> Self { Self { retries: 3 } } }` | `impl Default for Settings { fn default() -> Self { ... } }` |
 | Q0074 | Manual Option/Result Mapping | Manual `match` repeats combinator behavior. | `match opt { Some(x) => Some(f(x)), None => None }` | `opt.map(f)` |
 | Q0075 | Manual Find/Any Loop | Loops manually implement iterator search predicates. | `for x in xs { if pred(x) { return Some(x); } }` | `xs.into_iter().find(pred)` |
-| Q0076 | Needless Explicit Lifetime | Explicit lifetimes are written where elision is clear. | `fn name<'a>(u: &'a User) -> &'a str` | `fn name(u: &User) -> &str` |
-| Q0077 | Derivable Impl | Manual impl duplicates a standard derive. | `impl Default for Mode { fn default() -> Self { Mode::Fast } }` | `#[derive(Default)] enum Mode { #[default] Fast }` |
+| Q0076 | Needless Explicit Lifetime | One unbounded lifetime only relates a simple input reference to its output and is unused in the body. | `fn name<'a>(s: &'a str) -> &'a str { s }` | `fn name(s: &str) -> &str { s }` |
+| Q0077 | Derivable Impl | Bounded checks establish equivalent fieldwise Default/Clone or empty Eq implementations on nongeneric local structs. | `impl Default for State { fn default() -> Self { Self { name: String::new() } } }` | Derive Default; preserve custom formatting, equality, hashing, and generic bounds |
 
 ## Concurrency
 
@@ -120,15 +126,15 @@ Concurrency smells flag async, locking, spawning, and thread-safety patterns tha
 
 | Code | Item | What it catches | Bad example | Good example |
 |---|---|---|---|---|
-| Q0078 | Blocking in Async | Blocking calls are made inside async functions. | `async fn load() { std::fs::read(path).unwrap(); }` | `tokio::fs::read(path).await?` or `spawn_blocking` |
+| Q0078 | Blocking in Async | An exact known blocking API executes in an async function, method, or block. | `async fn load() { std::fs::read(path); }` | Use async I/O or `spawn_blocking`; worker closures are separate execution contexts |
 | Q0079 | Deadlock Risk | Locks are acquired in inconsistent orders. | `lock(a); lock(b);` in one path and `lock(b); lock(a);` in another | Use one lock order or combine state under one lock |
-| Q0080 | Spawn Without Join | A task is spawned and its handle is not tracked. | `tokio::spawn(work());` | `let handle = tokio::spawn(work()); handle.await?;` |
+| Q0080 | Spawn Without Join | A known spawn API discards its JoinHandle as a statement or wildcard binding. | `tokio::spawn(work());` | Return, store, or await the handle; document intentional detachment |
 | Q0081 | Missing Send Bound | Async or spawned generic work lacks a `Send` bound. | `fn spawn_task<T: Job>(job: T) { tokio::spawn(async move { job.run() }) }` | `fn spawn_task<T: Job + Send + 'static>(job: T) { ... }` |
 | Q0082 | Sync Drop Blocking | `Drop` performs blocking work. | `impl Drop for Client { fn drop(&mut self) { self.flush_blocking(); } }` | Provide explicit async or fallible shutdown before drop |
-| Q0083 | Std Mutex in Async | `std::sync::Mutex` is used in async code where it may block an executor. | `let guard = state.lock().unwrap(); do_async().await;` | Use `tokio::sync::Mutex` or avoid holding locks across await |
-| Q0084 | Blocking Channel in Async | Blocking channel receive/send is used inside async code. | `rx.recv().unwrap()` in an async function | `tokio::sync::mpsc` with `rx.recv().await` |
-| Q0085 | Holding Lock Across Await | A lock guard lives across an `.await`. | `let guard = lock.lock().await; fetch().await;` | Finish locked work, drop guard, then await |
-| Q0086 | Dropped JoinHandle | A join handle is explicitly discarded. | `let _ = tokio::spawn(work());` | Store the handle, await it, or document detached task ownership |
+| Q0083 | Std Mutex in Async | Exploratory review of locally established standard locks used in async code. Presence alone does not establish blocking. | Review `std::sync::Mutex` use for contention | Short synchronous critical sections may be appropriate; Tokio locks are excluded |
+| Q0084 | Blocking Channel in Async | A locally established synchronous channel receiver performs a blocking receive in async execution. | `rx.recv()` with `rx: std::sync::mpsc::Receiver<T>` | Use an async channel or blocking worker |
+| Q0085 | Holding Lock Across Await | A known synchronous guard remains live at an executed await. | `let g = lock.lock().unwrap(); fetch().await; drop(g);` | Release the guard before awaiting; constructing a deferred future is not a suspension |
+| Q0086 | Dropped JoinHandle | A known task/thread spawn result is explicitly discarded. | `let _ = tokio::spawn(work());` | Keep the handle or document detachment; Rayon and unrelated spawn APIs are excluded |
 
 ## Unsafe
 
@@ -137,9 +143,9 @@ Unsafe smells focus on auditability and FFI boundaries. They do not mean unsafe 
 | Code | Item | What it catches | Bad example | Good example |
 |---|---|---|---|---|
 | Q0087 | Unsafe Without Comment | Unsafe blocks or impls lack a nearby safety explanation. | `unsafe { ptr.read() }` | `// SAFETY: ptr is non-null and aligned. unsafe { ptr.read() }` |
-| Q0088 | Transmute Usage | `std::mem::transmute` bypasses normal type checks. | `let y: U = unsafe { transmute(x) };` | Use `from_ne_bytes`, pointer casts with checks, or explicit conversions |
-| Q0089 | Raw Pointer Arithmetic | Raw pointer offset math is used directly. | `unsafe { ptr.add(i).read() }` without bounds proof | Use slices or document bounds before pointer arithmetic |
-| Q0090 | Multi Mut Ref Unsafe | Unsafe code creates multiple mutable references to the same data. | `let a = &mut *p; let b = &mut *p;` | Split with `slice.split_at_mut()` or prove disjoint pointers |
+| Q0088 | Transmute Usage | Exact std/core transmute or transmute_copy calls, including resolved imports. | `unsafe { std::mem::transmute::<u32, f32>(x) }` | Prefer checked conversions where they preserve representation |
+| Q0089 | Raw Pointer Arithmetic | Pointer offset operations have locally established raw-pointer receivers. | `fn f(p: *const u8) { unsafe { p.add(1); } }` | Use safe indexing where possible or verify provenance and bounds |
+| Q0090 | Multi Mut Ref Unsafe | Exploratory review of repeated mutable-reference construction from the same raw-pointer binding in one execution scope. Aliasing is unproven. | `let a = &mut *p; let b = &mut *p;` | Verify lifetimes and provenance; safe reborrows and Option::as_mut are excluded |
 | Q0091 | FFI Without Wrapper | Raw extern functions are called directly from broad application code. | `unsafe { c_library_call(arg) }` in handlers | Wrap FFI in a small safe Rust API that validates inputs |
 | Q0092 | Inline Assembly | Inline assembly appears and needs focused review. | `unsafe { asm!("nop") }` | Prefer compiler intrinsics or isolate assembly behind a documented function |
 | Q0093 | Unsafe Fn Missing Safety Docs | An `unsafe fn` lacks a `# Safety` contract. | `pub unsafe fn from_raw(p: *mut T) -> Self` with no docs | Document caller obligations under `# Safety` |
