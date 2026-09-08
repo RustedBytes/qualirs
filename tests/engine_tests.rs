@@ -17,10 +17,10 @@ fn engine_detects_smells_in_sample_project() {
 
 pub fn overly_long_and_complex(x: i32, y: i32, z: i32, w: i32, v: i32, u: i32, extra: i32) {
     // Too many arguments (7 > 6)
-    let a = Some(1).unwrap();
-    let b = Some(2).unwrap();
-    let c = Some(3).unwrap();
-    let d = Some(4).unwrap();
+    let a = std::fs::read("file1").unwrap();
+    let b = std::fs::read("file2").unwrap();
+    let c = std::fs::read("file3").unwrap();
+    let d = std::fs::read("file4").unwrap();
     // Excessive unwrap (4 > 3)
 
     if x > 0 {
@@ -104,10 +104,10 @@ fn precision_modes_filter_high_medium_and_low_confidence_findings() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let code = r#"
 fn mixed_confidence(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32) {
-    let _ = Some(1).unwrap();
-    let _ = Some(2).unwrap();
-    let _ = Some(3).unwrap();
-    let _ = Some(4).unwrap();
+    let _ = std::fs::read("file1").unwrap();
+    let _ = std::fs::read("file2").unwrap();
+    let _ = std::fs::read("file3").unwrap();
+    let _ = std::fs::read("file4").unwrap();
     let port = 1337;
     let _ = (a, b, c, d, e, f, g, port);
 }
@@ -150,10 +150,10 @@ fn min_severity_filters_correctly() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let code = r#"
 fn risky() {
-    let _ = Some(1).unwrap();
-    let _ = Some(2).unwrap();
-    let _ = Some(3).unwrap();
-    let _ = Some(4).unwrap();
+    let _ = std::fs::read("file1").unwrap();
+    let _ = std::fs::read("file2").unwrap();
+    let _ = std::fs::read("file3").unwrap();
+    let _ = std::fs::read("file4").unwrap();
 }
 "#;
     std::fs::write(dir.path().join("prod.rs"), code).expect("write prod.rs");
@@ -190,10 +190,10 @@ fn policy_skip_tests_controls_test_file_analysis() {
     std::fs::create_dir(&tests_dir).expect("create tests dir");
     let code = r#"
 fn risky_test_helper() {
-    let _ = Some(1).unwrap();
-    let _ = Some(2).unwrap();
-    let _ = Some(3).unwrap();
-    let _ = Some(4).unwrap();
+    let _ = std::fs::read("file1").unwrap();
+    let _ = std::fs::read("file2").unwrap();
+    let _ = std::fs::read("file3").unwrap();
+    let _ = std::fs::read("file4").unwrap();
 }
 "#;
     std::fs::write(tests_dir.join("risky.rs"), code).expect("write risky test file");
@@ -259,10 +259,10 @@ fn policy_skips_examples_generated_and_macro_heavy_sources_by_default() {
 fn risky_unwrap_code() -> &'static str {
     r#"
 fn risky_helper() {
-    let _ = Some(1).unwrap();
-    let _ = Some(2).unwrap();
-    let _ = Some(3).unwrap();
-    let _ = Some(4).unwrap();
+    let _ = std::fs::read("file1").unwrap();
+    let _ = std::fs::read("file2").unwrap();
+    let _ = std::fs::read("file3").unwrap();
+    let _ = std::fs::read("file4").unwrap();
 }
 "#
 }

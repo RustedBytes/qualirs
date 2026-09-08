@@ -21,13 +21,20 @@ impl Detector for VecContainsInLoopDetector {
             {
                 findings.push((
                     call.method.span().start().line,
-                    "Vec membership performs a linear scan inside a loop".to_string(),
+                    if ctx
+                        .binding_origin(&call.receiver)
+                        .is_some_and(|origin| origin >= ctx.loop_start)
+                    {
+                        FindingConfidence::Low
+                    } else {
+                        FindingConfidence::High
+                    },
                 ));
             }
         });
-        findings.into_iter().map(|(line, message)| Smell::new(
- SmellCategory::Performance, "Vec Contains in Loop", Severity::Info, FindingConfidence::High,
- SourceLocation::new(file.path.clone(), line, line, None), message, "Consider a set when repeated membership lookup dominates; retain Vec when ordering or small size justifies it.",
+        findings.into_iter().map(|(line, confidence)| Smell::new(
+ SmellCategory::Performance, "Vec Contains in Loop", Severity::Info, confidence,
+ SourceLocation::new(file.path.clone(), line, line, None), if confidence == FindingConfidence::High { "Vec membership performs a linear scan inside a loop" } else { "A locally created Vec is searched inside a loop; repeated lookup benefit is unproven" }, "Consider a companion set when repeated membership lookup dominates; retain Vec when ordering or small size justifies it. Building a set for one lookup may add cost.",
  )).collect()
     }
 }

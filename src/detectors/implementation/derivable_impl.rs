@@ -54,7 +54,7 @@ impl Detector for DerivableImplDetector {
                 continue;
             }
             let equivalent = if standard == "Eq" {
-                imp.items.is_empty()
+                imp.items.is_empty() && strukt.fields.iter().all(|f| ctx.proves_eq(&f.ty))
             } else {
                 fieldwise(imp, strukt, standard, &ctx)
             };

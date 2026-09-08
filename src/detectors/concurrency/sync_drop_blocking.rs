@@ -1,104 +1,170 @@
-use syn::visit::Visit;
+use crate::analysis::{
+    detector::Detector,
+    evidence::{self, Context, Kind},
+};
+use crate::domain::{
+    smell::{FindingConfidence, Severity, Smell, SmellCategory, SourceLocation},
+    source::SourceFile,
+};
+use syn::{spanned::Spanned, visit::Visit};
 
-use crate::analysis::detector::Detector;
-use crate::domain::smell::{Severity, Smell, SmellCategory, SourceLocation};
-use crate::domain::source::SourceFile;
-
-/// Detects potentially blocking code (I/O, Sleep, networking) inside `impl Drop`.
-///
-/// Running synchronous blocking code inside Drop allows it to be covertly invoked
-/// across async boundaries, blocking the executor threads and causing massive latency spikes.
+/// Blocking work in a destructor is not by itself proof of an async hazard.
 pub struct SyncDropBlockingDetector;
-
 impl Detector for SyncDropBlockingDetector {
     fn name(&self) -> &str {
         "Sync Drop Blocking (Async Hazard)"
     }
-
     fn detect(&self, file: &SourceFile) -> Vec<Smell> {
-        let mut smells = Vec::new();
-
-        for item in &file.ast.items {
-            if let syn::Item::Impl(imp) = item
-                && let Some((path, _)) = &imp.trait_
-                && path.is_ident("Drop")
-            {
-                let mut visitor = BlockingDropVisitor {
-                    violations: Vec::new(),
-                };
-                for it_item in &imp.items {
-                    visitor.visit_impl_item(it_item);
+        struct Drops<'a> {
+            items: &'a [syn::Item],
+            scopes: Vec<(syn::ImplItemFn, Vec<(syn::Member, syn::Type)>)>,
+        }
+        impl<'a> Visit<'a> for Drops<'a> {
+            fn visit_item_impl(&mut self, i: &'a syn::ItemImpl) {
+                let ctx = Context::new(self.items);
+                if !i.trait_.as_ref().is_some_and(|(p, _)| {
+                    matches!(
+                        ctx.path(p).as_str(),
+                        "Drop" | "std::ops::Drop" | "core::ops::Drop"
+                    )
+                }) {
+                    return;
                 }
-
-                if !visitor.violations.is_empty() {
-                    let type_name = if let syn::Type::Path(tp) = &*imp.self_ty {
-                        tp.path
-                            .segments
-                            .last()
-                            .map(|s| s.ident.to_string())
-                            .unwrap_or_else(|| "Unknown".to_string())
-                    } else {
-                        "Unknown".to_string()
-                    };
-
-                    for (line, method) in visitor.violations {
-                        smells.push(Smell::new(
-                                                    SmellCategory::Concurrency,
-                                                    "Sync Drop Blocking (Async Hazard)",
-                                                    Severity::Critical,
-                                                                                                        crate::domain::smell::FindingConfidence::High,
-                                                    SourceLocation::new(file.path.clone(), line, line, None),
-                                                    format!(
-                                                        "`Drop` impl for `{}` calls potentially blocking method `{}`", type_name, method
-                                                    ),
-                                                    "Use `tokio::spawn(async move { ... })` for background cleanup or provide a separate `async fn shutdown()` method rather than blocking in Drop.",
-                                                ));
+                let fields = self.items.iter().find_map(|item| match item {
+                    syn::Item::Struct(s) if matches!(&*i.self_ty, syn::Type::Path(t) if t.path.is_ident(&s.ident.to_string())) => Some(s.fields.iter().enumerate().map(|(n, f)| (
+                        f.ident.clone().map(syn::Member::Named).unwrap_or_else(|| syn::Member::Unnamed(n.into())), f.ty.clone()
+                    )).collect::<Vec<_>>()), _ => None,
+                }).unwrap_or_default();
+                for item in &i.items {
+                    if let syn::ImplItem::Fn(f) = item
+                        && f.sig.ident == "drop"
+                    {
+                        self.scopes.push((f.clone(), fields.clone()));
                     }
                 }
             }
-        }
-
-        smells
-    }
-}
-
-struct BlockingDropVisitor {
-    violations: Vec<(usize, String)>,
-}
-
-impl<'ast> Visit<'ast> for BlockingDropVisitor {
-    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
-        let method = node.method.to_string();
-        let blocking_methods = [
-            "read",
-            "read_to_end",
-            "read_to_string",
-            "write",
-            "write_all",
-            "flush",
-            "lock",
-            "recv",
-            "send",
-        ];
-
-        if blocking_methods.contains(&method.as_str()) {
-            let line = node.method.span().start().line;
-            self.violations.push((line, method));
-        }
-
-        syn::visit::visit_expr_method_call(self, node);
-    }
-
-    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
-        if let syn::Expr::Path(tp) = &*node.func
-            && let Some(seg) = tp.path.segments.last()
-        {
-            let name = seg.ident.to_string();
-            if name == "sleep" || name == "park" {
-                let line = seg.ident.span().start().line;
-                self.violations.push((line, name));
+            fn visit_item_mod(&mut self, m: &'a syn::ItemMod) {
+                if let Some((_, items)) = &m.content {
+                    let saved = self.items;
+                    self.items = items;
+                    for i in items {
+                        self.visit_item(i);
+                    }
+                    self.items = saved;
+                }
             }
         }
-        syn::visit::visit_expr_call(self, node);
+        let mut drops = Drops {
+            items: &file.ast.items,
+            scopes: Vec::new(),
+        };
+        drops.visit_file(&file.ast);
+        let mut findings = Vec::new();
+        evidence::inspect(&file.ast, |expr, ctx| {
+            let Some((_, fields)) = drops.scopes.iter().find(|(f, _)| {
+                let p = f.sig.ident.span().start();
+                ctx.execution == (p.line, p.column)
+            }) else {
+                return;
+            };
+            let evidence = match expr {
+                syn::Expr::Call(c) => {
+                    let syn::Expr::Path(p) = &*c.func else {
+                        return;
+                    };
+                    let path = ctx.path(&p.path);
+                    if matches!(
+                        path.as_str(),
+                        "std::thread::sleep" | "std::thread::park" | "std::thread::park_timeout"
+                    ) || path.starts_with("std::fs::") && evidence::is_fs_result(&path)
+                    {
+                        Some((FindingConfidence::High, path))
+                    } else {
+                        None
+                    }
+                }
+                syn::Expr::MethodCall(c) => {
+                    let method = c.method.to_string();
+                    let field = if let syn::Expr::Field(f) = &*c.receiver
+                        && matches!(&*f.base, syn::Expr::Path(p) if p.path.is_ident("self"))
+                    {
+                        fields
+                            .iter()
+                            .find(|(member, _)| *member == f.member)
+                            .map(|(_, ty)| ty)
+                    } else {
+                        None
+                    };
+                    let kind = field
+                        .map(|t| ctx.kind(t))
+                        .unwrap_or_else(|| ctx.expr(&c.receiver));
+                    if matches!(kind.value(), Kind::AsyncLock) {
+                        return;
+                    }
+                    // An owned mutex is exclusively accessible during Drop. An Arc or
+                    // reference to a mutex does not carry this guarantee.
+                    if field.is_some()
+                        && kind == Kind::SyncLock
+                        && matches!(method.as_str(), "lock" | "read" | "write")
+                    {
+                        return;
+                    }
+                    if let Some(syn::Type::Path(p)) = field
+                        && matches!(
+                            ctx.path(&p.path).as_str(),
+                            "std::sync::Mutex"
+                                | "std::sync::RwLock"
+                                | "parking_lot::Mutex"
+                                | "parking_lot::RwLock"
+                        )
+                        && matches!(method.as_str(), "lock" | "read" | "write")
+                    {
+                        return;
+                    }
+                    let known = matches!(
+                        (kind.value(), method.as_str()),
+                        (
+                            Kind::Writer,
+                            "read"
+                                | "read_to_end"
+                                | "read_to_string"
+                                | "write"
+                                | "write_all"
+                                | "flush"
+                                | "sync_all"
+                                | "sync_data"
+                        ) | (Kind::SyncReceiver, "recv" | "recv_timeout")
+                    );
+                    if known {
+                        Some((FindingConfidence::High, method))
+                    } else if matches!(
+                        method.as_str(),
+                        "read"
+                            | "read_to_end"
+                            | "read_to_string"
+                            | "write"
+                            | "write_all"
+                            | "flush"
+                            | "lock"
+                            | "recv"
+                            | "send"
+                    ) {
+                        Some((FindingConfidence::Low, method))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            if let Some((confidence, operation)) = evidence {
+                let line = expr.span().start().line;
+                findings.push(Smell::new(SmellCategory::Concurrency, self.name(), Severity::Warning, confidence,
+                    SourceLocation::new(file.path.clone(), line, line, None),
+                    if confidence == FindingConfidence::High { format!("Drop executes synchronous blocking operation `{operation}`") }
+                    else { format!("Drop calls `{operation}`; blocking behavior and async execution are unproven") },
+                    "Review destructor latency. If cleanup can block or fail, consider explicit shutdown before dropping; background cleanup requires an owned lifetime and an available runtime."));
+            }
+        });
+        findings
     }
 }

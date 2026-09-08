@@ -1,99 +1,103 @@
-use crate::analysis::detector::Detector;
-use crate::domain::smell::{Severity, Smell, SmellCategory, SourceLocation};
-use crate::domain::source::SourceFile;
+use crate::analysis::{
+    detector::Detector,
+    evidence::{Context, Kind},
+};
+use crate::domain::{
+    smell::{FindingConfidence, Severity, Smell, SmellCategory, SourceLocation},
+    source::SourceFile,
+};
 
-/// Detects `new()` constructors that simply return default field values.
+/// Suggest Default only for proven default fields without an existing implementation.
 pub struct ManualDefaultConstructorDetector;
-
 impl Detector for ManualDefaultConstructorDetector {
     fn name(&self) -> &str {
         "Manual Default Constructor"
     }
-
     fn detect(&self, file: &SourceFile) -> Vec<Smell> {
-        let mut smells = Vec::new();
-
+        let ctx = Context::new(&file.ast.items);
+        let mut findings = Vec::new();
         for item in &file.ast.items {
-            if let syn::Item::Impl(imp) = item {
-                for impl_item in &imp.items {
-                    if let syn::ImplItem::Fn(func) = impl_item
-                        && func.sig.ident == "new"
-                        && returns_self(&func.sig.output)
-                        && has_no_inputs(&func.sig.inputs)
-                        && body_is_defaultish(&func.block)
-                    {
-                        let line = func.sig.fn_token.span.start().line;
-                        smells.push(Smell::new(
-                                SmellCategory::Idiomaticity,
-                                "Manual Default Constructor",
-                                Severity::Info,
-                                                                crate::domain::smell::FindingConfidence::High,
-                                SourceLocation::new(file.path.clone(), line, line, None),
-                                "Constructor `new` appears to return only default field values",
-                                "Implement or derive Default and delegate `new()` to `Self::default()`.",
-                            ));
-                    }
+            let syn::Item::Impl(imp) = item else {
+                continue;
+            };
+            if imp.trait_.is_some() || !imp.generics.params.is_empty() {
+                continue;
+            }
+            let syn::Type::Path(ty) = &*imp.self_ty else {
+                continue;
+            };
+            let Some(name) = ty.path.get_ident() else {
+                continue;
+            };
+            let Some(strukt) = file.ast.items.iter().find_map(|i| match i {
+                syn::Item::Struct(s) if s.ident == *name => Some(s),
+                _ => None,
+            }) else {
+                continue;
+            };
+            if !strukt.generics.params.is_empty() || existing_default(file, strukt, &ctx) {
+                continue;
+            }
+            let syn::Fields::Named(fields) = &strukt.fields else {
+                continue;
+            };
+            for item in &imp.items {
+                let syn::ImplItem::Fn(f) = item else {
+                    continue;
+                };
+                if f.sig.ident != "new"
+                    || !f.sig.inputs.is_empty()
+                    || f.sig.constness.is_some()
+                    || !f.sig.generics.params.is_empty()
+                    || !matches!(&f.sig.output, syn::ReturnType::Type(_, t) if matches!(&**t, syn::Type::Path(p) if p.path.is_ident("Self")))
+                {
+                    continue;
+                }
+                let [syn::Stmt::Expr(syn::Expr::Struct(body), None)] = f.block.stmts.as_slice()
+                else {
+                    continue;
+                };
+                if !body.path.is_ident("Self")
+                    || body.rest.is_some()
+                    || body.fields.is_empty()
+                    || body.fields.len() != fields.named.len()
+                {
+                    continue;
+                }
+                let defaults = fields.named.iter().all(|field| {
+                    let Some(value) = body.fields.iter().find(|v| matches!(&v.member, syn::Member::Named(n) if Some(n) == field.ident.as_ref())) else { return false; };
+                    let syn::Expr::Call(c) = &value.expr else { return false; };
+                    let syn::Expr::Path(p) = &*c.func else { return false; };
+                    if !c.args.is_empty() { return false; }
+                    let path = ctx.path(&p.path);
+                    matches!(path.as_str(), "Default::default" | "std::default::Default::default" | "core::default::Default::default")
+                        || ctx.kind(&field.ty) == Kind::Vec && matches!(path.as_str(), "Vec::new" | "std::vec::Vec::new" | "alloc::vec::Vec::new")
+                        || ctx.kind(&field.ty) == Kind::String && matches!(path.as_str(), "String::new" | "std::string::String::new" | "alloc::string::String::new")
+                });
+                if defaults {
+                    let line = f.sig.fn_token.span.start().line;
+                    findings.push(Smell::new(SmellCategory::Idiomaticity, self.name(), Severity::Info, FindingConfidence::High,
+                        SourceLocation::new(file.path.clone(), line, line, None),
+                        "Constructor initializes default fields and no local Default implementation exists",
+                        "Consider deriving Default; keep one implementation of initialization and avoid mutual new/default delegation."));
                 }
             }
         }
-
-        smells
+        findings
     }
 }
 
-fn returns_self(output: &syn::ReturnType) -> bool {
-    matches!(output, syn::ReturnType::Type(_, ty) if matches!(&**ty, syn::Type::Path(path) if path.path.is_ident("Self")))
+fn existing_default(file: &SourceFile, strukt: &syn::ItemStruct, ctx: &Context) -> bool {
+    strukt.attrs.iter().any(|a| a.path().is_ident("derive") && a.parse_args_with(
+        syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
+    ).is_ok_and(|paths| paths.iter().any(|p| is_default(&ctx.path(p)))))
+        || file.ast.items.iter().any(|item| matches!(item, syn::Item::Impl(i)
+            if matches!(&*i.self_ty, syn::Type::Path(p) if p.path.is_ident(&strukt.ident.to_string()))
+            && i.trait_.as_ref().is_some_and(|(p, _)| is_default(&ctx.path(p)))))
 }
-
-fn has_no_inputs(inputs: &syn::punctuated::Punctuated<syn::FnArg, syn::token::Comma>) -> bool {
-    inputs.is_empty()
-}
-
-fn body_is_defaultish(block: &syn::Block) -> bool {
-    single_tail_expr(block).is_some_and(is_defaultish_expr)
-}
-
-fn single_tail_expr(block: &syn::Block) -> Option<&syn::Expr> {
-    match block.stmts.as_slice() {
-        [syn::Stmt::Expr(expr, None)] => Some(expr),
-        _ => None,
-    }
-}
-
-fn is_defaultish_expr(expr: &syn::Expr) -> bool {
-    match expr {
-        syn::Expr::Call(call) => is_default_call(&call.func),
-        syn::Expr::Struct(strukt) => {
-            strukt.path.is_ident("Self")
-                && !strukt.fields.is_empty()
-                && strukt
-                    .fields
-                    .iter()
-                    .all(|field| is_defaultish_expr(&field.expr))
-        }
-        _ => false,
-    }
-}
-
-fn is_default_call(func: &syn::Expr) -> bool {
-    let syn::Expr::Path(path) = func else {
-        return false;
-    };
-    let mut segments = path
-        .path
-        .segments
-        .iter()
-        .map(|segment| segment.ident.to_string());
+fn is_default(path: &str) -> bool {
     matches!(
-        (
-            segments.next().as_deref(),
-            segments.next().as_deref(),
-            segments.next()
-        ),
-        (
-            Some("Default" | "Self" | "String" | "Vec"),
-            Some("default" | "new"),
-            None
-        )
+        path,
+        "Default" | "std::default::Default" | "core::default::Default"
     )
 }

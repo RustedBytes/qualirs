@@ -1,6 +1,12 @@
-use syn::visit::{
-    Visit, visit_expr_call, visit_expr_for_loop, visit_expr_loop, visit_expr_method_call,
-    visit_expr_while,
+use crate::analysis::evidence;
+use crate::domain::smell::FindingConfidence;
+use std::collections::HashMap;
+use syn::{
+    spanned::Spanned,
+    visit::{
+        Visit, visit_expr_call, visit_expr_for_loop, visit_expr_loop, visit_expr_method_call,
+        visit_expr_while,
+    },
 };
 
 use crate::analysis::detector::Detector;
@@ -16,17 +22,47 @@ impl Detector for RepeatedRegexConstructionDetector {
     }
 
     fn detect(&self, file: &SourceFile) -> Vec<Smell> {
+        let mut candidates = HashMap::new();
+        evidence::inspect(&file.ast, |expr, ctx| {
+            let syn::Expr::Call(call) = expr else {
+                return;
+            };
+            let syn::Expr::Path(path) = &*call.func else {
+                return;
+            };
+            let resolved = ctx.path(&path.path);
+            let known = matches!(
+                resolved.as_str(),
+                "regex::Regex::new" | "regex::bytes::Regex::new" | "regex_lite::Regex::new"
+            );
+            if !known && resolved != "Regex::new" {
+                return;
+            }
+            let literal = matches!(call.args.first(), Some(syn::Expr::Lit(l)) if matches!(l.lit, syn::Lit::Str(_)));
+            candidates.insert(
+                evidence::span_key(call.span()),
+                (
+                    ctx.loop_depth > 0,
+                    if known && literal {
+                        FindingConfidence::High
+                    } else {
+                        FindingConfidence::Low
+                    },
+                ),
+            );
+        });
         let mut visitor = RegexVisitor {
             loop_depth: 0,
             lazy_initializer_depth: 0,
             findings: Vec::new(),
+            candidates,
         };
         visitor.visit_file(&file.ast);
 
         visitor
             .findings
             .into_iter()
-            .map(|(line, in_loop)| {
+            .map(|(line, in_loop, confidence)| {
                 Smell::new(
                     SmellCategory::Performance,
                     "Repeated Regex Construction",
@@ -35,10 +71,10 @@ impl Detector for RepeatedRegexConstructionDetector {
                     } else {
                         Severity::Info
                     },
-                    crate::domain::smell::FindingConfidence::High,
+                    confidence,
                     SourceLocation::new(file.path.clone(), line, line, None),
-                    "Regex is constructed at runtime".to_string(),
-                    "Store regexes in LazyLock, OnceLock, or lazy_static when they are reused.",
+                    if confidence == FindingConfidence::High { "A fixed regex pattern is compiled at runtime" } else { "Regex construction may be repeated; pattern reuse is unproven" },
+                    if confidence == FindingConfidence::High { "If reused, cache this fixed pattern in LazyLock or OnceLock." } else { "For reused dynamic patterns, consider query-scoped or keyed caching; a single static regex may change behavior." },
                 )
             })
             .collect()
@@ -48,7 +84,8 @@ impl Detector for RepeatedRegexConstructionDetector {
 struct RegexVisitor {
     loop_depth: usize,
     lazy_initializer_depth: usize,
-    findings: Vec<(usize, bool)>,
+    findings: Vec<(usize, bool, FindingConfidence)>,
+    candidates: HashMap<(usize, usize, usize, usize), (bool, FindingConfidence)>,
 }
 
 impl<'ast> Visit<'ast> for RegexVisitor {
@@ -83,9 +120,12 @@ impl<'ast> Visit<'ast> for RegexVisitor {
                 self.visit_lazy_initializer_args(&node.args);
                 return;
             }
-            if path_str.ends_with("Regex::new") && self.lazy_initializer_depth == 0 {
+            if let Some(&(in_loop, confidence)) =
+                self.candidates.get(&evidence::span_key(node.span()))
+                && self.lazy_initializer_depth == 0
+            {
                 let line = path.path.segments.last().unwrap().ident.span().start().line;
-                self.findings.push((line, self.loop_depth > 0));
+                self.findings.push((line, in_loop, confidence));
             }
         }
         visit_expr_call(self, node);

@@ -1,5 +1,3 @@
-use quote::ToTokens;
-
 use crate::analysis::detector::Detector;
 use crate::domain::smell::{Severity, Smell, SmellCategory, SourceLocation};
 use crate::domain::source::SourceFile;
@@ -14,18 +12,28 @@ impl Detector for UnsafeImplSafetyDocsDetector {
 
     fn detect(&self, file: &SourceFile) -> Vec<Smell> {
         let mut smells = Vec::new();
+        let docs = crate::analysis::source_notes::SafetyDocs::new(file);
+        let ctx = crate::analysis::evidence::Context::new(&file.ast.items);
         for item in &file.ast.items {
             if let syn::Item::Impl(imp) = item
                 && imp.unsafety.is_some()
-                && !has_safety_docs(&imp.attrs)
+                && !docs.contains(imp.unsafety.unwrap().span)
             {
-                let trait_name = imp
+                let trait_path = imp
                     .trait_
                     .as_ref()
-                    .and_then(|(path, _)| path.segments.last())
-                    .map(|seg| seg.ident.to_string())
+                    .map(|(path, _)| ctx.path(path))
                     .unwrap_or_default();
-                if matches!(trait_name.as_str(), "Send" | "Sync") {
+                if matches!(
+                    trait_path.as_str(),
+                    "Send"
+                        | "Sync"
+                        | "std::marker::Send"
+                        | "std::marker::Sync"
+                        | "core::marker::Send"
+                        | "core::marker::Sync"
+                ) {
+                    let trait_name = trait_path.rsplit("::").next().unwrap_or("");
                     let line = imp.impl_token.span.start().line;
                     smells.push(Smell::new(
                             SmellCategory::Unsafe,
@@ -41,17 +49,4 @@ impl Detector for UnsafeImplSafetyDocsDetector {
         }
         smells
     }
-}
-
-fn has_safety_docs(attrs: &[syn::Attribute]) -> bool {
-    attrs
-        .iter()
-        .filter(|attr| attr.path().is_ident("doc"))
-        .any(doc_attr_mentions_safety)
-}
-
-fn doc_attr_mentions_safety(attr: &syn::Attribute) -> bool {
-    let tokens = attr.meta.to_token_stream();
-    let text = tokens.to_string();
-    text.to_lowercase().contains("safety")
 }

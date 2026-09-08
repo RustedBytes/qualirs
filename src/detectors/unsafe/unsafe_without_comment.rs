@@ -21,10 +21,10 @@ impl Detector for UnsafeWithoutCommentDetector {
         }
 
         let mut smells = Vec::new();
-        let source_lines: Vec<&str> = file.code.lines().collect();
+        let docs = crate::analysis::source_notes::SafetyDocs::new(file);
 
         let mut visitor = UnsafeVisitor {
-            source_lines: &source_lines,
+            docs: &docs,
             smells: &mut smells,
             file_path: &file.path,
         };
@@ -35,7 +35,7 @@ impl Detector for UnsafeWithoutCommentDetector {
 }
 
 struct UnsafeVisitor<'a> {
-    source_lines: &'a [&'a str],
+    docs: &'a crate::analysis::source_notes::SafetyDocs,
     smells: &'a mut Vec<Smell>,
     file_path: &'a std::path::Path,
 }
@@ -44,7 +44,7 @@ impl<'ast, 'a> Visit<'ast> for UnsafeVisitor<'a> {
     fn visit_expr_unsafe(&mut self, node: &'ast syn::ExprUnsafe) {
         let line = node.unsafe_token.span.start().line;
 
-        if !has_safety_comment(self.source_lines, line) {
+        if !self.docs.contains(node.unsafe_token.span) {
             self.smells.push(Smell::new(
                 SmellCategory::Unsafe,
                 "Unsafe Without Comment",
@@ -70,7 +70,7 @@ impl<'ast, 'a> Visit<'ast> for UnsafeVisitor<'a> {
         if let Some(unsafety) = node.unsafety {
             let line = unsafety.span.start().line;
 
-            if !has_safety_comment(self.source_lines, line) {
+            if !self.docs.contains(unsafety.span) {
                 self.smells.push(Smell::new(
                     SmellCategory::Unsafe,
                     "Unsafe Without Comment",
@@ -97,7 +97,7 @@ impl<'ast, 'a> Visit<'ast> for UnsafeVisitor<'a> {
         if let syn::Safety::Unsafe(unsafety) = &node.sig.safety {
             let line = unsafety.span.start().line;
 
-            if !has_safety_comment(self.source_lines, line) {
+            if !self.docs.contains(unsafety.span) {
                 self.smells.push(Smell::new(
                     SmellCategory::Unsafe,
                     "Unsafe Without Comment",
@@ -117,17 +117,4 @@ impl<'ast, 'a> Visit<'ast> for UnsafeVisitor<'a> {
 
         syn::visit::visit_item_fn(self, node);
     }
-}
-
-const SAFETY_COMMENT_LOOKBACK: usize = 3;
-
-fn has_safety_comment(lines: &[&str], line_number: usize) -> bool {
-    let start = line_number.saturating_sub(SAFETY_COMMENT_LOOKBACK);
-    let end = line_number;
-
-    (start..end).any(|i| {
-        lines
-            .get(i)
-            .is_some_and(|line| line.to_lowercase().contains("safety"))
-    })
 }

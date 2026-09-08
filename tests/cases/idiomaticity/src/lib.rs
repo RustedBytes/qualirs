@@ -20,10 +20,10 @@ pub fn library_panic() {
 }
 
 fn many_unwraps() {
-    let _ = Some(1).unwrap();
-    let _ = Some(2).unwrap();
-    let _ = Some(3).unwrap();
-    let _ = Some(4).unwrap();
+    let _ = std::fs::read("config").unwrap();
+    let _ = std::fs::read("schema").unwrap();
+    let _ = std::fs::read("index").unwrap();
+    let _ = std::fs::read("data").unwrap();
 }
 
 fn ignore_result() {

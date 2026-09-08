@@ -40,6 +40,7 @@ pub(crate) struct Context {
     origins: HashMap<String, (usize, usize)>,
     pub in_async: bool,
     pub loop_depth: usize,
+    pub loop_start: (usize, usize),
     pub execution: (usize, usize),
     pub block: (usize, usize),
 }
@@ -178,6 +179,74 @@ impl Context {
 
     pub fn kind(&self, ty: &syn::Type) -> Kind {
         self.kind_at(ty, 0)
+    }
+
+    /// Deriving Eq requires Eq on every field even when PartialEq is manual.
+    /// Only closed standard types and resolved aliases are proven here.
+    pub fn proves_eq(&self, ty: &syn::Type) -> bool {
+        fn proven(ctx: &Context, ty: &syn::Type, depth: usize) -> bool {
+            if depth > 16 {
+                return false;
+            }
+            match ty {
+                syn::Type::Tuple(t) => t.elems.iter().all(|t| proven(ctx, t, depth + 1)),
+                syn::Type::Array(a) => proven(ctx, &a.elem, depth + 1),
+                syn::Type::Slice(s) => proven(ctx, &s.elem, depth + 1),
+                syn::Type::Reference(r) => proven(ctx, &r.elem, depth + 1),
+                syn::Type::Paren(p) => proven(ctx, &p.elem, depth + 1),
+                syn::Type::Group(g) => proven(ctx, &g.elem, depth + 1),
+                syn::Type::Path(p) if p.qself.is_none() => {
+                    if let Some(name) = p.path.get_ident()
+                        && let Some(alias) = ctx.aliases.get(&name.to_string())
+                    {
+                        return proven(ctx, alias, depth + 1);
+                    }
+                    match ctx.path(&p.path).as_str() {
+                        "bool"
+                        | "char"
+                        | "u8"
+                        | "u16"
+                        | "u32"
+                        | "u64"
+                        | "u128"
+                        | "usize"
+                        | "i8"
+                        | "i16"
+                        | "i32"
+                        | "i64"
+                        | "i128"
+                        | "isize"
+                        | "str"
+                        | "String"
+                        | "std::string::String"
+                        | "alloc::string::String" => true,
+                        "Vec"
+                        | "std::vec::Vec"
+                        | "alloc::vec::Vec"
+                        | "Option"
+                        | "std::option::Option"
+                        | "core::option::Option"
+                        | "Box"
+                        | "std::boxed::Box"
+                        | "alloc::boxed::Box"
+                        | "std::sync::Arc"
+                        | "alloc::sync::Arc" => {
+                            let Some(segment) = p.path.segments.last() else {
+                                return false;
+                            };
+                            let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+                            else {
+                                return false;
+                            };
+                            matches!(args.args.first(), Some(syn::GenericArgument::Type(t)) if args.args.len() == 1 && proven(ctx, t, depth + 1))
+                        }
+                        _ => false,
+                    }
+                }
+                _ => false,
+            }
+        }
+        proven(self, ty, 0)
     }
 
     fn kind_at(&self, ty: &syn::Type, depth: usize) -> Kind {
@@ -746,6 +815,10 @@ impl<'a, F: FnMut(&syn::Expr, &Context)> Visit<'a> for Scanner<F> {
     fn visit_expr_for_loop(&mut self, n: &'a syn::ExprForLoop) {
         self.visit_expr(&n.expr);
         let prev = self.context.clone();
+        if self.context.loop_depth == 0 {
+            let p = n.for_token.span.start();
+            self.context.loop_start = (p.line, p.column);
+        }
         self.context.loop_depth += 1;
         self.context.bindings.push(HashMap::new());
         self.context.bind(&n.pat, Kind::Unknown);
@@ -755,6 +828,10 @@ impl<'a, F: FnMut(&syn::Expr, &Context)> Visit<'a> for Scanner<F> {
     }
     fn visit_expr_while(&mut self, n: &'a syn::ExprWhile) {
         let prev = self.context.clone();
+        if self.context.loop_depth == 0 {
+            let p = n.while_token.span.start();
+            self.context.loop_start = (p.line, p.column);
+        }
         self.context.loop_depth += 1;
         self.context.bindings.push(HashMap::new());
         self.visit_expr(&n.cond);
@@ -767,6 +844,10 @@ impl<'a, F: FnMut(&syn::Expr, &Context)> Visit<'a> for Scanner<F> {
     }
     fn visit_expr_loop(&mut self, n: &'a syn::ExprLoop) {
         let prev = self.context.clone();
+        if self.context.loop_depth == 0 {
+            let p = n.loop_token.span.start();
+            self.context.loop_start = (p.line, p.column);
+        }
         self.context.loop_depth += 1;
         self.visit_block(&n.body);
         self.context = prev;

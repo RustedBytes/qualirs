@@ -1,3 +1,4 @@
+use crate::analysis::source_notes::{SourceNotes, doc_text};
 use crate::analysis::{
     detector::Detector,
     evidence::{self, Kind},
@@ -6,7 +7,7 @@ use crate::domain::{
     smell::{FindingConfidence, Severity, Smell, SmellCategory, SourceLocation},
     source::SourceFile,
 };
-use std::collections::HashSet;
+use std::collections::HashMap;
 use syn::{spanned::Spanned, visit::Visit};
 pub struct UnusedResultDetector;
 impl Detector for UnusedResultDetector {
@@ -17,28 +18,99 @@ impl Detector for UnusedResultDetector {
         if crate::detectors::policy::is_test_path(&file.path) {
             return Vec::new();
         }
-        struct Discards(HashSet<(usize, usize, usize, usize)>);
-        impl<'a> Visit<'a> for Discards {
+        struct Discards<'a> {
+            values: HashMap<(usize, usize, usize, usize), (bool, bool)>,
+            notes: &'a SourceNotes,
+            documented: bool,
+            in_drop: bool,
+        }
+        fn intentional(text: &str) -> bool {
+            let text = text.to_ascii_lowercase();
+            [
+                "best-effort",
+                "best effort",
+                "non-fatal",
+                "swallows",
+                "intentionally ignore",
+            ]
+            .iter()
+            .any(|s| text.contains(s))
+        }
+        impl<'a> Visit<'a> for Discards<'_> {
             fn visit_local(&mut self, n: &'a syn::Local) {
                 if matches!(n.pat, syn::Pat::Wild(_))
                     && let Some(init) = &n.init
                 {
-                    self.0.insert(evidence::span_key(init.expr.span()));
+                    self.values.insert(
+                        evidence::span_key(init.expr.span()),
+                        (
+                            self.documented || intentional(&self.notes.leading(n.span())),
+                            self.in_drop,
+                        ),
+                    );
                 }
                 syn::visit::visit_local(self, n);
             }
+            fn visit_item_fn(&mut self, n: &'a syn::ItemFn) {
+                let saved = (self.documented, self.in_drop);
+                self.documented = intentional(&doc_text(&n.attrs));
+                self.in_drop = false;
+                syn::visit::visit_item_fn(self, n);
+                (self.documented, self.in_drop) = saved;
+            }
+            fn visit_impl_item_fn(&mut self, n: &'a syn::ImplItemFn) {
+                let saved = self.documented;
+                self.documented = intentional(&doc_text(&n.attrs));
+                syn::visit::visit_impl_item_fn(self, n);
+                self.documented = saved;
+            }
+            fn visit_item_impl(&mut self, n: &'a syn::ItemImpl) {
+                let saved = self.in_drop;
+                self.in_drop = n.trait_.as_ref().is_some_and(|(p, _)| p.is_ident("Drop"));
+                syn::visit::visit_item_impl(self, n);
+                self.in_drop = saved;
+            }
+            fn visit_expr_closure(&mut self, n: &'a syn::ExprClosure) {
+                let saved = (self.documented, self.in_drop);
+                self.documented = false;
+                self.in_drop = false;
+                syn::visit::visit_expr_closure(self, n);
+                (self.documented, self.in_drop) = saved;
+            }
+            fn visit_expr_async(&mut self, n: &'a syn::ExprAsync) {
+                let saved = (self.documented, self.in_drop);
+                self.documented = false;
+                self.in_drop = false;
+                syn::visit::visit_expr_async(self, n);
+                (self.documented, self.in_drop) = saved;
+            }
         }
-        let mut discarded = Discards(HashSet::new());
+        let notes = SourceNotes::new(&file.code);
+        let mut discarded = Discards {
+            values: HashMap::new(),
+            notes: &notes,
+            documented: false,
+            in_drop: false,
+        };
         discarded.visit_file(&file.ast);
         let mut findings = Vec::new();
         evidence::inspect(&file.ast, |expr, ctx| {
             let p = expr.span().start();
             // Remove the expression position so wrappers cannot accidentally report an inner Result.
-            if !discarded.0.remove(&evidence::span_key(expr.span())) {
+            let Some((documented, in_drop)) =
+                discarded.values.remove(&evidence::span_key(expr.span()))
+            else {
                 return;
-            }
+            };
+            let cleanup = matches!(expr, syn::Expr::Call(c) if matches!(&*c.func, syn::Expr::Path(p)
+                if matches!(ctx.path(&p.path).as_str(), "std::fs::remove_file" | "std::fs::remove_dir")));
+            let documented = documented || in_drop && cleanup;
             let confidence = if matches!(ctx.expr(expr), Kind::Result(_)) {
-                Some(FindingConfidence::High)
+                Some(if documented {
+                    FindingConfidence::Low
+                } else {
+                    FindingConfidence::High
+                })
             } else if ctx.expr(expr) == Kind::Unknown && heuristic_result(expr, ctx) {
                 Some(FindingConfidence::Low)
             } else {
@@ -53,6 +125,8 @@ impl Detector for UnusedResultDetector {
                     SourceLocation::new(file.path.clone(), p.line, p.line, None),
                     if confidence == FindingConfidence::High {
                         "A Result is discarded without handling its error"
+                    } else if documented && matches!(ctx.expr(expr), Kind::Result(_)) {
+                        "A Result is discarded in destructor or documented best-effort code; review error observability"
                     } else {
                         "This discarded expression may return a Result; its type is unresolved"
                     },
