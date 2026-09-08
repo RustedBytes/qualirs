@@ -1,9 +1,13 @@
 [package]
 name = "qualirs"
 version = "0.5.0"
+authors = ["Yehor Smoliakov <egorsmkv@gmail.com>"]
 edition = "2024"
 description = "Structural and architectural code smell detector for Rust"
 license = "MIT"
+repository = "https://github.com/RustedBytes/qualirs"
+homepage = "https://github.com/RustedBytes/qualirs"
+documentation = "https://github.com/RustedBytes/qualirs/tree/main/docs"
 
 [lib]
 name = "qualirs"
