@@ -62,6 +62,9 @@ qualirs --threads 4 .
 # Quiet mode (summary only, great for CI)
 qualirs --quiet .
 
+# Show analysis time, CPU use, and peak process memory
+qualirs --stats .
+
 # JSON output
 qualirs --format json --output qualirs-report.json .
 ```
@@ -96,12 +99,29 @@ Options:
       --table                        Table mode: show findings in the legacy table layout
       --llm                          LLM mode: show compact Markdown with fenced finding blocks for coding assistants
       --how-fix                      Explain each finding with current source code and improvement guidance
+      --stats                        Show analysis elapsed time, CPU time, and peak process memory at the end
       --format <FORMAT>              Output format [possible values: json]
       --output <OUTPUT_PATH>         Write JSON findings to a file instead of stdout
       --list-detectors               List available detectors and exit
   -h, --help                         Print help
   -V, --version                      Print version
 ```
+
+### Resource Statistics
+
+Add `--stats` to append a resource summary after the findings:
+
+```text
+Analysis resources:
+  Elapsed time: 0.125 s
+  CPU time (all process threads): 0.375 s
+  Peak memory (process lifetime): 24.50 MiB
+  CPU and memory exclude child processes.
+```
+
+Elapsed and CPU times cover analysis, including file discovery, parsing, and detectors. Source download/cloning, configuration loading, and report formatting are outside that interval. CPU time sums the work of all QualiRS threads, so parallel analysis can use more CPU seconds than elapsed seconds. Peak memory is the process's highest resident memory usage up to the end of analysis, including earlier preparation; it is not a count of total allocations. Child processes such as Cargo and Git are excluded from CPU and memory counters.
+
+The flag works with quiet, table, LLM, and how-fix output. With `--format json`, stats are written to stderr, including when `--output` writes the JSON report to a file. The JSON schema and analysis exit codes are unchanged. CPU and memory counters are supported on Windows, Linux, and macOS; unavailable counters are labeled `unavailable`. Without `--stats`, resource counters are not collected.
 
 ### Generate Configuration
 

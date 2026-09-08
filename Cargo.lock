@@ -521,6 +521,7 @@ dependencies = [
  "fixed-json",
  "flate2",
  "ignore",
+ "libc",
  "proc-macro2",
  "quote",
  "rayon",
@@ -532,6 +533,7 @@ dependencies = [
  "thiserror",
  "toml",
  "ureq",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

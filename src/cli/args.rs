@@ -98,6 +98,10 @@ pub(crate) struct FilterOptions {
 
 #[derive(clap::Args, Debug)]
 pub(crate) struct OutputOptions {
+    /// Show analysis elapsed time, CPU time, and peak process memory at the end
+    #[arg(long, conflicts_with = "list_detectors")]
+    pub(crate) stats: bool,
+
     /// Quiet mode: only show summary counts
     #[arg(short, long)]
     pub(crate) quiet: bool,

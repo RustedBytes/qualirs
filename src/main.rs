@@ -38,10 +38,21 @@ fn run() -> anyhow::Result<ExitCode> {
     }
     let config = get_config(&args, source.path())?;
     let engine = setup_engine(config);
+    let resource_tracker = args
+        .output_options
+        .stats
+        .then(cli::stats::ResourceTracker::start);
     let mut report = engine.analyze(source.path());
+    let resource_stats = resource_tracker.map(cli::stats::ResourceTracker::finish);
 
     apply_category_filter(&mut report, args.filters.category.as_deref())?;
     emit_report(&report, &args.output_options)?;
+    if let Some(stats) = resource_stats {
+        cli::stats::emit(
+            &stats,
+            args.output_options.format == Some(OutputFormat::Json),
+        )?;
+    }
 
     Ok(exit_code_for_report(&report))
 }
@@ -227,6 +238,7 @@ mod tests {
                 category: None,
             },
             output_options: OutputOptions {
+                stats: false,
                 quiet: false,
                 compact: false,
                 table: false,
