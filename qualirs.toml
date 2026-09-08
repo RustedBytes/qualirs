@@ -1,16 +1,31 @@
+# QualiRS project configuration, aligned with the built-in defaults.
+# See README.md for usage and docs/detectors.md for rule-specific evidence.
+# Regenerate a complete configuration with: qualirs init-config --output <path>
+
+# File discovery also respects Git ignore rules and skips hidden entries.
 exclude_paths = [
     "target",
     ".git",
     "node_modules",
 ]
+# Stable rule codes, for example ["Q0001", "Q0011"]. No rules are ignored here.
 ignore_findings = []
+
+# Severity and confidence are independent filters.
+# Severity: info, warning, critical.
 min_severity = "info"
+# Conservative: high confidence; balanced: high + medium; exploratory: all.
+# Override for one run with --precision balanced or --precision exploratory.
 precision = "conservative"
+# 0 uses Rayon's default worker pool, typically all logical CPUs.
 threads = 0
 
+# Keep threshold tables complete: omitted fields within a partial table do not
+# inherit the corresponding built-in values. Units are lines/counts unless noted.
 [thresholds.arch]
 god_module_loc = 1000
-god_module_items = 25
+god_module_items = 20
+# Fraction of top-level items that are public (0.0 to 1.0).
 public_api_ratio = 0.7
 feature_concentration = 15
 hidden_global_state = 3
@@ -29,6 +44,7 @@ stringly_typed_fields = 3
 large_error_enum_variants = 12
 
 [thresholds.impl]
+# Source-size and control-flow metrics; these do not establish runtime defects.
 long_function_loc = 50
 long_closure_loc = 25
 deep_closure_nesting = 3
@@ -52,7 +68,10 @@ arc_mutex_overuse = 3
 unsafe_without_comment = true
 
 [policy]
+# Exclude matching test paths and test-only items before detection.
+# Set false to include them; production-capable cfg conditions remain eligible.
 skip_tests = true
+# Case-sensitive path-component names or suffixes, including fuzz targets.
 test_path_markers = [
     "tests",
     "test",
@@ -63,10 +82,14 @@ test_path_markers = [
 ]
 skip_examples = true
 skip_benches = true
+# Recognized generated paths or source headers.
 skip_generated = true
+# Skip files with at least 3 top-level items when half or more are macros.
 skip_macro_heavy_files = true
+# Exempt matching data-carrier/template structs from applicable design rules.
 skip_data_carrier_structs = true
 skip_template_structs = true
+# Naming heuristics used only when skip_data_carrier_structs is enabled.
 data_carrier_struct_suffixes = [
     "Activity",
     "Command",

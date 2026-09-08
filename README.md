@@ -164,7 +164,7 @@ skip_data_carrier_structs = true
 skip_template_structs = true
 ```
 
-For numeric thresholds, start with the complete file produced by `init-config` and edit its values. Partial threshold tables are not merged field-by-field with the built-in defaults. The generated file also lists `test_path_markers` and `data_carrier_struct_suffixes` for customizing policy matching. The repository's [qualirs.toml](qualirs.toml) is a project configuration, not an exact copy of all built-in defaults.
+For numeric thresholds, start with the complete file produced by `init-config` and edit its values. Partial threshold tables are not merged field-by-field with the built-in defaults. The generated file also lists `test_path_markers` and `data_carrier_struct_suffixes` for customizing policy matching. The repository's [qualirs.toml](qualirs.toml) provides an annotated configuration aligned with these defaults.
 
 Tests, examples, benches, recognized generated sources, and macro-heavy files are excluded by default. Data-carrier and template policies exempt matching structs from applicable design rules. Disable the corresponding policy setting to include those sources. Test-only items are masked before detection while preserving source locations: conditions requiring `test` are excluded, while production-capable conditions such as `not(test)` and `any(test, feature = "...")` remain eligible. This is not general Cargo feature evaluation.
 
