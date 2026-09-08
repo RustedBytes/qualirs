@@ -257,6 +257,11 @@ impl<'a> Visit<'a> for SafetyVisitor {
         let mut previous_call = None;
         for stmt in &block.stmts {
             let gap = self.notes.leading(stmt.span());
+            if mentions_safety(&gap)
+                && let Some(span) = documented_closure_call(stmt, &gap)
+            {
+                self.found.insert((span.start().line, span.start().column));
+            }
             let call = unsafe_call(stmt);
             let related = gap
                 .lines()
@@ -301,6 +306,72 @@ impl<'a> Visit<'a> for SafetyVisitor {
         self.documented = false;
         syn::visit::visit_expr_async(self, node);
         self.documented = saved;
+    }
+}
+
+/// A note that explicitly names one unsafe call can document that call inside
+/// a synchronous closure in the associated statement. This associates written
+/// explanations only; it does not carry execution state into a deferred body.
+fn documented_closure_call(stmt: &syn::Stmt, note: &str) -> Option<Span> {
+    struct Calls<'a> {
+        words: HashSet<&'a str>,
+        in_closure: bool,
+        unsafe_count: usize,
+        documented: Option<Span>,
+    }
+    impl<'a> Visit<'a> for Calls<'_> {
+        fn visit_item(&mut self, _: &'a syn::Item) {}
+        fn visit_expr_async(&mut self, _: &'a syn::ExprAsync) {}
+        fn visit_expr_closure(&mut self, n: &'a syn::ExprClosure) {
+            if self.in_closure || n.asyncness.is_some() {
+                return;
+            }
+            self.in_closure = true;
+            self.visit_expr(&n.body);
+            self.in_closure = false;
+        }
+        fn visit_expr_unsafe(&mut self, n: &'a syn::ExprUnsafe) {
+            self.unsafe_count += 1;
+            if self.in_closure
+                && let [syn::Stmt::Expr(syn::Expr::Call(call), _)] = n.block.stmts.as_slice()
+                && let syn::Expr::Path(path) = &*call.func
+                && let Some(name) = path.path.segments.last()
+                && self.words.contains(name.ident.to_string().as_str())
+            {
+                self.documented = Some(n.unsafe_token.span);
+            }
+        }
+    }
+    let words: HashSet<_> = note
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|word| !word.is_empty())
+        .collect();
+    // A comment about merely constructing a closure is not a contract for its
+    // unsafe work. Require an explicit condition as well as the operation name.
+    if ![
+        "valid",
+        "lifetime",
+        "invariant",
+        "preconditions",
+        "initialized",
+        "bounds",
+    ]
+    .iter()
+    .any(|word| words.contains(word))
+    {
+        return None;
+    }
+    let mut calls = Calls {
+        words,
+        in_closure: false,
+        unsafe_count: 0,
+        documented: None,
+    };
+    calls.visit_stmt(stmt);
+    if calls.unsafe_count == 1 {
+        calls.documented
+    } else {
+        None
     }
 }
 
