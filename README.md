@@ -2,114 +2,123 @@
 
 **Structural and architectural code smell detector for Rust.**
 
-QualiRS parses your Rust source code with AST analysis and detects structural code smells across 7 categories: Architecture, Design, Implementation, Performance, Idiomaticity, Concurrency, and Unsafe. It is designed to complement `clippy` — where clippy focuses on lint-level correctness and idioms, QualiRS focuses on structural, architectural, and design-level problems.
+QualiRS scans Rust source files using a `syn` AST and 96 built-in detectors across seven categories. It highlights maintainability issues, structural metrics, and potential performance or safety problems for review. Run it alongside the compiler and Clippy.
 
-## Features
+Source scanning does not require the target project to compile. Type-sensitive rules use bounded local evidence, including resolvable imports, types, and bindings. QualiRS does not perform compiler-level type checking or expand macros, and a finding is not proof of a bug. The default **conservative** mode reports only high-confidence findings; broader structural checks and uncertain heuristics are available through other precision modes.
 
-- 96 built-in smell detectors across 7 categories
-- Parallel analysis via rayon, with configurable thread count
-- Configurable thresholds via `qualirs.toml`
-- Stable `Q0001`-style finding codes with config-based and inline ignores
-- False-positive policy controls for tests, DTOs, templates, and config structs
-- Compact terminal output by default, with table, LLM, quiet, and JSON modes
-- CI-friendly: exits with code 1 on critical smells
-- Respects `.gitignore` automatically
+## Build and run
 
-## Quick Start
+Use a Rust toolchain supporting the project's Rust 2024 edition and locked dependencies. Git is needed for cloning repositories.
 
 ```bash
-# Build
-cargo build --release
+git clone https://github.com/RustedBytes/qualirs.git
+cd qualirs
+cargo build --release --locked
 
-# Analyze current project
-cargo run --release -- .
+# Run the built binary on the current directory
+./target/release/qualirs .
 
-# Analyze a specific path
-qualirs ~/projects/my-crate
+# Optional: install the local checkout into Cargo's bin directory
+cargo install --path . --locked
+```
 
-# Analyze a git repository
-qualirs --git https://github.com/bivex/QualiR
-qualirs --git git@github.com:bivex/QualiR.git
+On Windows PowerShell, run `.\target\release\qualirs.exe .`. The examples below use `qualirs` from your `PATH`.
 
-# Use a specific parent directory for temporary git/crate sources
-qualirs --git https://github.com/bivex/QualiR --temp-dir /var/tmp/qualirs
+```bash
+# A directory or a standalone Rust file
+qualirs /path/to/my-crate
+qualirs src/lib.rs --config qualirs.toml
 
-# Keep temporary git/crate sources for inspection after analysis
-qualirs --crate serde --keep-temp --temp-dir /var/tmp/qualirs
+# Include structural findings, or all confidence levels
+qualirs --precision balanced .
+qualirs --precision exploratory .
 
-# Analyze a specific git branch or tag
-qualirs --git https://github.com/bivex/QualiR --branch main
-qualirs --git git@github.com:bivex/QualiR.git --tag v1.0.0
+# Filter the report and set analysis parallelism
+qualirs --min-severity warning --category performance --threads 4 .
 
-# Analyze the latest published crates.io source for a crate
-qualirs --crate serde
-
-# Analyze a specific crates.io crate version
-qualirs --crate serde --crate-version 1.0.228
-
-# List all detectors
-qualirs --list-detectors
-
-# Create a default configuration file
-qualirs init-config
-
-# Only show warnings and critical
-qualirs --min-severity warning .
-
-# Use four analysis threads
-qualirs --threads 4 .
-
-# Quiet mode (summary only, great for CI)
+# Summary, resource usage, or detailed guidance
 qualirs --quiet .
-
-# Show analysis time, CPU use, and peak process memory
 qualirs --stats .
+qualirs --how-fix --precision balanced .
 
-# JSON output
+# JSON on stdout or in a file
+qualirs --format json .
 qualirs --format json --output qualirs-report.json .
+
+# Discover rules and generate a complete configuration
+qualirs --list-detectors
+qualirs init-config
 ```
 
-## CLI Reference
+### Remote sources
 
-```
-qualirs [OPTIONS] [PATH] [COMMAND]
-
-Arguments:
-  [PATH]  Path to the Rust project or file to analyze (defaults to current directory)
-
-Commands:
-  init-config  Generate a default qualirs.toml configuration file
-  help         Print this message or the help of the given subcommand(s)
-
-Options:
-      --git <URL>                    Git repository URL to clone and analyze
-      --branch <BRANCH>              Git branch to check out when using --git
-      --tag <TAG>                    Git tag to check out when using --git
-      --crate <CRATE>                crates.io crate name to download and analyze
-      --crate-version <VERSION>      crates.io crate version to download when using --crate
-      --temp-dir <DIR>               Directory to create temporary git and crate analysis folders in
-      --keep-temp                    Preserve temporary git and crate analysis folders after the run
-  -c, --config <CONFIG>              Configuration file path (default: qualirs.toml in project root)
-      --threads <THREADS>            Number of analysis threads to use (0 = all logical CPUs)
-  -m, --min-severity <MIN_SEVERITY>  Minimum severity to report: info, warning, critical
-      --precision <PRECISION>        Precision mode: conservative, balanced, exploratory
-  -t, --category <CATEGORY>          Show only smells of a specific category
-  -q, --quiet                        Quiet mode: only show summary counts
-      --compact                      Compact mode: show findings as a categorized list (default)
-      --table                        Table mode: show findings in the legacy table layout
-      --llm                          LLM mode: show compact Markdown with fenced finding blocks for coding assistants
-      --how-fix                      Explain each finding with current source code and improvement guidance
-      --stats                        Show analysis elapsed time, CPU time, and peak process memory at the end
-      --format <FORMAT>              Output format [possible values: json]
-      --output <OUTPUT_PATH>         Write JSON findings to a file instead of stdout
-      --list-detectors               List available detectors and exit
-  -h, --help                         Print help
-  -V, --version                      Print version
+```bash
+qualirs --git https://github.com/RustedBytes/qualirs.git --branch main
+qualirs --git git@github.com:RustedBytes/qualirs.git
+qualirs --crate serde
+qualirs --crate serde --crate-version 1.0.228
+qualirs --crate serde --keep-temp --temp-dir /var/tmp/qualirs
 ```
 
-### Resource Statistics
+Choose one source: a local path, `--git`, or `--crate`. Git sources accept either `--branch` or `--tag`. Without `--crate-version`, QualiRS requests the latest published crate version. Downloaded and cloned sources are temporary unless `--keep-temp` is set; `--temp-dir` chooses their parent directory. Remote acquisition requires network access and the appropriate repository credentials.
 
-Add `--stats` to append a resource summary after the findings:
+## Precision, severity, and CI
+
+Confidence describes the strength of a detector's evidence. Severity describes the reported concern. They are independent: a low-confidence heuristic can carry critical severity when shown in exploratory mode.
+
+| Precision | Confidence levels reported | Intended use |
+|---|---|---|
+| `conservative` (default) | High | Findings with stronger source evidence |
+| `balanced` | High and medium | Also review structural and maintainability findings |
+| `exploratory` | High, medium, and low | Also inspect unproven heuristics |
+
+`--precision` overrides the configured mode for that run. All modes still respect severity, category, policy exclusions, and ignores. A clean conservative report does not imply that an exploratory report will be empty.
+
+| Severity | Meaning | Effect on a successful analysis run |
+|---|---|---|
+| Info | Suggestion or review hint | Does not fail the run |
+| Warning | Concern worth reviewing | Does not fail the run |
+| Critical | Higher-severity concern, including large structural metrics | Exit code 1 if retained in the report |
+
+With no reported critical findings, analysis exits with code 0. Precision, severity, category, and ignore filters apply before this decision. Clap usage errors use exit code 2; configuration, source-acquisition, and other operational errors can also fail the command. Parse errors are reported separately and do not by themselves cause the critical-finding exit. Check JSON `parse_errors` if CI must require every source file to parse.
+
+## CLI options
+
+Run `qualirs --help` for the complete command syntax: `qualirs [OPTIONS] [PATH] [COMMAND]`.
+
+| Option | Purpose |
+|---|---|
+| `--git <URL>` | Clone and analyze a Git repository |
+| `--branch <BRANCH>`, `--tag <TAG>` | Select a Git reference; mutually exclusive |
+| `--crate <CRATE>`, `--crate-version <VERSION>` | Download a crates.io source package |
+| `--temp-dir <DIR>`, `--keep-temp` | Choose temporary storage and optionally preserve it |
+| `-c, --config <CONFIG>` | Load an explicit configuration file |
+| `--threads <THREADS>` | Rayon worker count; 0 uses the default pool, typically all logical CPUs |
+| `-m, --min-severity <LEVEL>` | `info`, `warning`, or `critical` |
+| `--precision <MODE>` | `conservative`, `balanced`, or `exploratory` |
+| `-t, --category <CATEGORY>` | Filter by one of the seven categories below |
+| `-q, --quiet` | Summary counts only |
+| `--compact` | Categorized terminal list; the default output |
+| `--table` | Table output |
+| `--llm` | Markdown with fenced finding blocks for coding assistants |
+| `--how-fix` | Current source and improvement guidance; no files are changed |
+| `--stats` | Append elapsed time, CPU time, and peak process memory |
+| `--format json` | Machine-readable report |
+| `--output <OUTPUT_PATH>` | Write JSON to a file; requires `--format json` |
+| `--list-detectors` | Print the built-in rule inventory and exit |
+| `-h, --help`, `-V, --version` | Show help or version |
+
+Choose one output mode. `--stats` works with the analysis output modes. Replacement snippets in detailed guidance are limited to supported transformations; uncertain cases provide guidance without replacement code.
+
+### JSON
+
+Reports contain `summary`, `smells`, and `parse_errors`. Each finding includes `code`, `severity`, `confidence`, `category`, `name`, `location`, `message`, and `suggestion`. Locations contain `file`, `line_start`, `line_end`, and an optional `column`. Line numbers start at 1; columns, when present, start at 0.
+
+The `files_analyzed` summary currently counts discovered Rust files before policy exclusions and parse failures, so it is not the number of files on which every detector ran.
+
+### Resource statistics
+
+Add `--stats` for a footer such as:
 
 ```text
 Analysis resources:
@@ -119,297 +128,177 @@ Analysis resources:
   CPU and memory exclude child processes.
 ```
 
-Durations use readable units from nanoseconds through days, with minutes and seconds shown separately for longer runs. Memory automatically scales from bytes through KiB, MiB, GiB, and larger binary units.
+Elapsed and CPU times cover file discovery, parsing, and detectors. Cloning/downloading, configuration loading, and report formatting are outside that interval. CPU time sums all QualiRS threads and can exceed elapsed time. Peak memory is the process's highest resident memory usage up to the end of analysis, including preparation; it is not total allocated bytes. Cargo and Git child processes are excluded from CPU and memory counters.
 
-Elapsed and CPU times cover analysis, including file discovery, parsing, and detectors. Source download/cloning, configuration loading, and report formatting are outside that interval. CPU time sums the work of all QualiRS threads, so parallel analysis can use more CPU seconds than elapsed seconds. Peak memory is the process's highest resident memory usage up to the end of analysis, including earlier preparation; it is not a count of total allocations. Child processes such as Cargo and Git are excluded from CPU and memory counters.
+Durations use units from nanoseconds through days; memory uses bytes and binary units such as KiB, MiB, and GiB. CPU and memory counters are supported on Windows, Linux, and macOS, with `unavailable` shown when a counter cannot be read. Without `--stats`, these resource counters are not collected.
 
-The flag works with quiet, table, LLM, and how-fix output. With `--format json`, stats are written to stderr, including when `--output` writes the JSON report to a file. The JSON schema and analysis exit codes are unchanged. CPU and memory counters are supported on Windows, Linux, and macOS; unavailable counters are labeled `unavailable`. Without `--stats`, resource counters are not collected.
+For JSON output, the footer goes to **stderr**, including when `--output` writes the report to a file. Statistics do not add JSON fields or change exit-code behavior.
 
-### Generate Configuration
-
-```
-qualirs init-config [OPTIONS]
-
-Options:
-  -o, --output <OUTPUT>  Config file to create [default: qualirs.toml]
-  -f, --force            Overwrite an existing config file
-  -h, --help             Print help
-```
-
-## Detectors
-
-Run `qualirs --list-detectors` for the complete detector inventory. See the [detector reference](docs/detectors.md) for explanations and good/bad examples for every rule. The current built-in set is grouped as follows:
-
-| Category | Count | Examples |
-|---|---:|---|
-| Architecture | 13 | God Module, Layer Violation, Public API Leak, Duplicate Dependency Versions |
-| Design | 16 | Large Trait, Anemic Struct, Data Clumps, God Struct, Large Error Enum |
-| Implementation | 14 | Long Function, Magic Numbers, Deep If/Else Nesting, Duplicate Match Arms |
-| Performance | 23 | Excessive Clone, Missing Collection Preallocation, Repeated Regex Construction, Inline Candidate |
-| Idiomaticity | 11 | Excessive Unwrap, Unused Result Ignored, Manual Find/Any Loop, Derivable Impl |
-| Concurrency | 9 | Blocking in Async, Spawn Without Join, Holding Lock Across Await |
-| Unsafe | 10 | Unsafe Without Comment, FFI Without Wrapper, Unsafe Fn Missing Safety Docs |
-
-Several detectors use configurable numeric thresholds. Others report any matching pattern because the match is specific enough to warrant review.
-
-### Magic Number Whitelist
-
-The following numbers are **not** flagged as magic: `0`, `1`, `-1`, `2`, `10`, `100`, `1000`, `255`, `256`, `1024`.
-
-## Configuration
-
-Create a `qualirs.toml` in your project root. All fields are optional — missing values use defaults.
+## Configuration and ignores
 
 ```bash
 qualirs init-config
+qualirs init-config --output config/qualirs.toml
+# Overwrite an existing configuration explicitly
+qualirs init-config --force
 ```
 
+Without `--config`, QualiRS looks for `qualirs.toml` directly in the analyzed directory; it does not search parent directories for configuration. For standalone file analysis, pass `--config` explicitly to use your project's settings. An invalid automatically discovered config prints a warning and falls back to defaults; an invalid explicit config fails the command.
+
+A small configuration can override reporting and policy settings:
+
 ```toml
-exclude_paths = [
-    "target",
-    ".git",
-    "node_modules",
-]
-min_severity = "info"
 precision = "conservative"
+min_severity = "info"
 threads = 0
-ignore_findings = [
-    # "Q0001", # God Module
-]
-
-[thresholds.arch]
-god_module_loc = 1000
-god_module_items = 20
-public_api_ratio = 0.7
-feature_concentration = 15
-hidden_global_state = 3
-
-[thresholds.design]
-large_trait_methods = 15
-excessive_generics = 5
-deep_trait_bounds = 4
-wide_hierarchy = 10
-fat_impl_methods = 20
-god_struct_fields = 20
-primitive_obsession_fields = 4
-data_clumps_args = 3
-data_clumps_occurrences = 3
-stringly_typed_fields = 3
-large_error_enum_variants = 12
-
-[thresholds.impl]
-long_function_loc = 50
-long_closure_loc = 25
-deep_closure_nesting = 3
-cyclomatic_complexity = 15
-too_many_arguments = 6
-deep_match_nesting = 3
-deep_if_else = 4
-excessive_unwrap = 3
-large_enum_variants = 20
-long_method_chain = 4
-lifetime_explosion = 4
-unsafe_block_overuse = 5
-deeply_nested_type = 3
-interior_mutability_abuse = 5
-
-[thresholds.concurrency]
-large_future_loc = 100
-arc_mutex_overuse = 3
-
-[thresholds.unsafe]
-unsafe_without_comment = true
+exclude_paths = ["target", ".git", "node_modules"]
+ignore_findings = []
 
 [policy]
 skip_tests = true
-test_path_markers = ["tests", "test", "tests.rs", "_tests.rs", "fuzz", "fuzz_targets"]
 skip_examples = true
 skip_benches = true
 skip_generated = true
 skip_macro_heavy_files = true
 skip_data_carrier_structs = true
 skip_template_structs = true
-data_carrier_struct_suffixes = [
-    "Activity",
-    "Command",
-    "Config",
-    "ConfigFile",
-    "Descriptor",
-    "Details",
-    "Dto",
-    "DTO",
-    "Entry",
-    "Event",
-    "Failure",
-    "Finding",
-    "FormData",
-    "Grant",
-    "Hit",
-    "Inspection",
-    "Item",
-    "Link",
-    "Metrics",
-    "Notification",
-    "Options",
-    "Outcome",
-    "Overview",
-    "Page",
-    "Query",
-    "Report",
-    "Request",
-    "Response",
-    "Result",
-    "Settings",
-    "SettingsFile",
-    "Session",
-    "Snapshot",
-    "Stats",
-    "Summary",
-    "Template",
-    "View",
-    "Vulnerability",
-]
 ```
 
-Policy settings control broad false-positive suppression. Set `skip_tests = false`, `skip_examples = false`, or `skip_benches = false` to analyze those files with the same rules as production code. Set `skip_generated = false`, `skip_macro_heavy_files = false`, `skip_data_carrier_structs = false`, or edit `data_carrier_struct_suffixes` if those sources should be checked by design detectors.
+For numeric thresholds, start with the complete file produced by `init-config` and edit its values. Partial threshold tables are not merged field-by-field with the built-in defaults. The generated file also lists `test_path_markers` and `data_carrier_struct_suffixes` for customizing policy matching. The repository's [qualirs.toml](qualirs.toml) is a project configuration, not an exact copy of all built-in defaults.
 
-Precision controls how much heuristic signal is shown by default. `conservative` reports only high-confidence findings, `balanced` includes medium-confidence structural findings, and `exploratory` includes every detector result. Use `--precision balanced` or `--precision exploratory` to override the config for one run.
+Tests, examples, benches, recognized generated sources, and macro-heavy files are excluded by default. Data-carrier and template policies exempt matching structs from applicable design rules. Disable the corresponding policy setting to include those sources. Test-only items are masked before detection while preserving source locations: conditions requiring `test` are excluded, while production-capable conditions such as `not(test)` and `any(test, feature = "...")` remain eligible. This is not general Cargo feature evaluation.
 
-Type-sensitive checks use bounded local evidence and respect variable shadowing. Unresolved result types, possible raw-pointer aliasing, nonzero Unicode count comparisons, and the presence of standard locks in async code are exploratory review candidates. Test-only items are filtered before analysis while production-capable cfg branches remain eligible. Suggested replacement code is omitted when semantic equivalence cannot be established.
-
-Each detector emits a stable `QNNNN` code in terminal and JSON output. Add codes to `ignore_findings` to suppress every matching finding, for example `ignore_findings = ["Q0001", "Q0011"]`. Run `qualirs --list-detectors` to see the full code list.
-
-To suppress a single finding inline, put a QualiRS ignore comment on the line immediately before the reported source line:
+Built-in finding codes run from `Q0001` through `Q0096`. Ignore a rule throughout a scan with, for example, `ignore_findings = ["Q0001", "Q0011"]`. For an individual finding, put the directive immediately before its reported source line:
 
 ```rust
 // qualirs:ignore Q0068
 let _ = fallible_operation();
 ```
 
-The code match is case-insensitive, and multiple codes can be separated by spaces or commas. Use `// qualirs:ignore` without codes to suppress any QualiRS finding on the next line.
+Codes are case-insensitive; separate multiple codes with spaces or commas. `// qualirs:ignore` with no codes suppresses all findings on the next line.
 
-## Severity Levels
+## Detectors and analysis limits
 
-| Level | Meaning | Exit code impact |
-|---|---|---|
-| **Info** | Style/convention suggestion, no action required | Exit 0 |
-| **Warning** | Structural problem that should be addressed | Exit 0 |
-| **Critical** | Serious smell requiring immediate attention | Exit 1 |
+See [docs/detectors.md](docs/detectors.md) for evidence requirements, examples, and confidence notes. `qualirs --list-detectors` prints every built-in code and name.
 
-Use `--min-severity warning` to hide info-level smells, or `--min-severity critical` to only see the worst.
+| Category | Count | Examples |
+|---|---:|---|
+| Architecture | 13 | God Module, Layer Violation, Public API Leak, Duplicate Dependency Versions |
+| Design | 16 | Large Trait, Anemic Struct, Data Clumps, God Struct, Large Error Enum |
+| Implementation | 14 | Long Function, High Cyclomatic Complexity, Deep If/Else Nesting, Duplicate Match Arms |
+| Performance | 23 | Excessive Clone, Missing Collection Preallocation, Repeated Regex Construction, Inline Candidate |
+| Idiomaticity | 11 | Excessive Unwrap, Unused Result Ignored, Manual Find/Any Loop, Derivable Impl |
+| Concurrency | 9 | Blocking in Async, Spawn Without Join, Holding Lock Across Await |
+| Unsafe | 10 | Unsafe Without Comment, FFI Without Wrapper, Unsafe Fn Missing Safety Docs |
 
-## Example Output
+Structural thresholds measure source shape, not runtime defects. Locally unresolved types stay unknown. Possible pointer aliasing, unproven lock overlap, nonzero Unicode character-count comparisons, and name-based inline candidates remain exploratory hints. Safety documentation checks recognize written explanations; they do not verify the soundness of unsafe code.
 
-```
-QualiRS — Rust Code Smell Detector
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Most rules inspect individual source files. Some architecture checks inspect nearby manifests or module files. Q0011 invokes `cargo tree -d --locked`; dependency resolution may access the network, and the rule produces no finding if Cargo is unavailable or fails. Set Cargo's `CARGO_NET_OFFLINE=true` environment variable when dependency checks must use only cached data. There is no QualiRS `--offline` flag.
 
-  → 32 files analyzed, 8 smell(s) detected
-    0 critical  2 warning  6 info
+The walker respects Git ignore rules and `exclude_paths` and skips hidden entries. Macros are not expanded, so generated Rust inside macro token streams is not generally analyzed. Syntax-only analysis can miss problems and produce false positives. The [self-audit](docs/self-audit.md) and repository audit reports in [docs](docs) record regression-driven improvements and their limits.
 
-▸ Architecture
-  INFO Q0005 Public API Explosion src/detectors/mod.rs:1
-    Module exposes a high ratio of public items (7/7)
+## Example output
 
-▸ Design
-  INFO Q0016 Anemic Struct src/domain/smell.rs:30
-    Struct `SourceLocation` has fields but no impl block in this file
-
-▸ Implementation
-  WARN Q0017 Long Function src/main.rs:12
-    Function `main` is ~58 lines long (threshold: 50)
-  WARN Q0017 Long Function src/detectors/generics.rs:44
-    Function `check_generics` is ~53 lines long (threshold: 50)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Found 8 smell(s). Review warnings above.
-```
-
-## Architecture
-
-QualiRS follows a clean layered architecture with strict dependency direction:
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  CLI (clap, compact/table/LLM/JSON output)              │
-├─────────────────────────────────────────────────────────┤
-│  Analysis Engine (Detector trait, policy, parallel run)  │
-├──────────────┬──────────────────────────────────────────┤
-│  Detectors   │  Domain (Smell, SourceLocation, Config)  │
-│  (83 rules)  │                                          │
-├──────────────┴──────────────────────────────────────────┤
-│  Infrastructure (ignore-aware file walker)              │
-├─────────────────────────────────────────────────────────┤
-│  Source (syn AST, proc_macro2 spans)                    │
-└─────────────────────────────────────────────────────────┘
-
-  Dependencies flow inward only.
-  No outer layer is referenced by inner layers.
-```
-
-### Writing a Custom Detector
-
-Implement the `Detector` trait:
+Given `example.rs`:
 
 ```rust
-use crate::analysis::detector::Detector;
-use crate::domain::smell::{Smell, SmellCategory, Severity, SourceLocation};
-use crate::domain::source::SourceFile;
-
-pub struct MyCustomDetector;
-
-impl Detector for MyCustomDetector {
-    fn name(&self) -> &str {
-        "My Custom Smell"
-    }
-
-    fn detect(&self, file: &SourceFile) -> Vec<Smell> {
-        let mut smells = Vec::new();
-
-        // Inspect file.ast (syn::File) and file.code (raw source)
-        for item in &file.ast.items {
-            if let syn::Item::Fn(fn_item) = item {
-                // Your detection logic here
-                if /* condition */ {
-                    smells.push(Smell::new(
-                        SmellCategory::Implementation,
-                        "My Custom Smell",
-                        Severity::Warning,
-                        SourceLocation {
-                            file: file.path.clone(),
-                            line_start: fn_item.sig.fn_token.span.start().line,
-                            line_end: fn_item.sig.fn_token.span.start().line,
-                            column: None,
-                        },
-                        "Description of the problem".into(),
-                        "How to fix it".into(),
-                    ));
-                }
-            }
-        }
-
-        smells
-    }
+fn work() -> Result<(), ()> { Ok(()) }
+fn main() {
+    let _ = work();
 }
 ```
 
-Then register it in `engine.rs`:
+Running `qualirs example.rs` produces:
 
-```rust
-self.register(Box::new(MyCustomDetector));
+```text
+QualiRS — Rust Code Smell Detector
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  → 1 files analyzed, 1 smell(s) detected
+    0 critical  1 warning  0 info
+
+▸ Idiomaticity
+  WARN Q0068 Unused Result Ignored example.rs:3
+    A Result is discarded without handling its error
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Found 1 smell(s). Review warnings above.
 ```
 
-## QualiRS vs Clippy
+## Code organization and extensions
 
-| Aspect | Clippy | QualiRS |
-|---|---|---|
-| Focus | Correctness, idioms, style | Structure, architecture, design |
-| Granularity | Expression/statement level | Function/module/crate level |
-| Configurability | Lint levels (allow/warn/deny) | Numeric thresholds and suppression policy |
-| Unsafe analysis | Basic (`unsafe_removed_from_code`) | SAFETY comment enforcement |
-| Structural metrics | None | LOC, CC, item count, pub ratio, nesting depth, method chains, lifetimes |
-| Overlap | Minimal | Complementary |
+| Directory | Responsibility |
+|---|---|
+| [src/cli](src/cli) | Arguments, terminal/JSON reporting, guidance, resource statistics |
+| [src/analysis](src/analysis) | Engine, detector trait, local evidence, source-note and visitor helpers |
+| [src/detectors](src/detectors) | Built-in rules, shared policy, and detector-specific helpers |
+| [src/domain](src/domain) | Findings, codes, source files, and configuration |
+| [src/infrastructure](src/infrastructure) | Source acquisition and ignore-aware file discovery |
+| [tests](tests) | Detector, CLI, and audit regressions |
+| [vscode](vscode/README.md) | VS Code extension and packaging instructions |
+
+The library exposes `Detector` and `Engine` for registering custom checks in Rust. There is no CLI plugin-loading flag. This complete example adds a file-length review rule to the built-in set:
+
+```rust
+use qualirs::{
+    analysis::{detector::Detector, engine::Engine},
+    domain::{
+        config::{Config, Precision},
+        smell::{FindingConfidence, Severity, Smell, SmellCategory, SourceLocation},
+        source::SourceFile,
+    },
+};
+
+struct FileLengthReview;
+
+impl Detector for FileLengthReview {
+    fn name(&self) -> &str {
+        "File Length Review"
+    }
+
+    fn detect(&self, file: &SourceFile) -> Vec<Smell> {
+        if file.line_count <= 2_000 {
+            return Vec::new();
+        }
+        vec![Smell::new(
+            SmellCategory::Implementation,
+            self.name(),
+            Severity::Info,
+            FindingConfidence::Medium,
+            SourceLocation::new(file.path.clone(), 1, 1, None),
+            format!("File has {} lines", file.line_count),
+            "Review whether this file has responsibilities that belong in separate modules.",
+        )]
+    }
+}
+
+fn main() {
+    let mut engine = Engine::new(Config {
+        precision: Precision::Balanced,
+        ..Config::default()
+    });
+    engine.register_defaults();
+    engine.register(Box::new(FileLengthReview));
+    let report = engine.analyze(std::path::Path::new("."));
+    println!("{} findings", report.total_smells());
+}
+```
+
+`Smell::new` assigns codes using the built-in name registry; unknown names receive `Q0000`. When contributing a built-in detector, add its code metadata in [src/domain/smell.rs](src/domain/smell.rs), register it in [src/analysis/engine.rs](src/analysis/engine.rs), and update the [CLI inventory](src/cli/detector_list.rs) and [detector reference](docs/detectors.md).
+
+## Development
+
+```bash
+cargo test --locked
+cargo build --release --locked
+
+# With dependencies already cached
+cargo test --locked --offline
+cargo build --release --locked --offline
+```
+
+Add genuine positive examples alongside false-positive regressions when changing a rule. Verify reporting precision, source locations, and ignores for affected findings. Prefer behavior-preserving refactoring over changing thresholds to make a report empty.
 
 ## License
 
-MIT
+MIT, as declared in [Cargo.toml](Cargo.toml).
