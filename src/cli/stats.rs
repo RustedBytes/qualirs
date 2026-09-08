@@ -57,16 +57,71 @@ pub(crate) fn emit(stats: &ResourceStats, json: bool) -> io::Result<()> {
 fn render(stats: &ResourceStats) -> String {
     let cpu = stats
         .cpu
-        .map(|duration| format!("{:.3} s", duration.as_secs_f64()))
+        .map(format_duration)
         .unwrap_or_else(|| "unavailable".into());
     let memory = stats
         .peak_memory_bytes
-        .map(|bytes| format!("{:.2} MiB", bytes as f64 / (1024.0 * 1024.0)))
+        .map(format_memory)
         .unwrap_or_else(|| "unavailable".into());
     format!(
-        "\nAnalysis resources:\n  Elapsed time: {:.3} s\n  CPU time (all process threads): {cpu}\n  Peak memory (process lifetime): {memory}\n  CPU and memory exclude child processes.\n",
-        stats.elapsed.as_secs_f64(),
+        "\nAnalysis resources:\n  Elapsed time: {}\n  CPU time (all process threads): {cpu}\n  Peak memory (process lifetime): {memory}\n  CPU and memory exclude child processes.\n",
+        format_duration(stats.elapsed),
     )
+}
+
+fn format_duration(duration: Duration) -> String {
+    let nanos = duration.as_nanos();
+    if nanos == 0 {
+        return "0 s".into();
+    }
+    // Round before splitting units, so 59.9999 seconds becomes 1 minute.
+    let millis = (nanos + 500_000) / 1_000_000;
+    if millis >= 1000 {
+        let mut seconds = millis / 1000;
+        let mut parts = Vec::new();
+        for (unit, size) in [("d", 86_400), ("h", 3600), ("min", 60)] {
+            let count = seconds / size;
+            if count > 0 {
+                parts.push(format!("{count} {unit}"));
+            }
+            seconds %= size;
+        }
+        if seconds > 0 || millis % 1000 > 0 || parts.is_empty() {
+            let value = seconds as f64 + (millis % 1000) as f64 / 1000.0;
+            parts.push(format!("{} s", compact_decimal(value)));
+        }
+        return parts.join(" ");
+    }
+    if nanos >= 1_000_000 {
+        format!("{} ms", compact_decimal(nanos as f64 / 1_000_000.0))
+    } else if nanos >= 1000 {
+        format!("{} µs", compact_decimal(nanos as f64 / 1000.0))
+    } else {
+        format!("{nanos} ns")
+    }
+}
+
+fn compact_decimal(value: f64) -> String {
+    format!("{value:.3}")
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string()
+}
+
+fn format_memory(bytes: u64) -> String {
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut value = bytes as f64;
+    let mut unit = "B";
+    for next in ["KiB", "MiB", "GiB", "TiB", "PiB", "EiB"] {
+        value /= 1024.0;
+        unit = next;
+        if value < 1024.0 {
+            break;
+        }
+    }
+    format!("{value:.2} {unit}")
 }
 
 #[cfg(windows)]
@@ -189,14 +244,34 @@ mod tests {
     #[test]
     fn footer_formats_units_and_missing_counters() {
         let stats = ResourceStats {
-            elapsed: Duration::from_millis(1250),
-            cpu: Some(Duration::from_millis(2500)),
-            peak_memory_bytes: Some(3 * 1024 * 1024),
+            elapsed: Duration::from_millis(94_559),
+            cpu: Some(Duration::from_millis(103_828)),
+            peak_memory_bytes: Some(275_513_344),
         };
         let text = render(&stats);
-        assert!(text.contains("Elapsed time: 1.250 s"));
-        assert!(text.contains("CPU time (all process threads): 2.500 s"));
-        assert!(text.contains("Peak memory (process lifetime): 3.00 MiB"));
+        assert!(text.contains("Elapsed time: 1 min 34.559 s"));
+        assert!(text.contains("CPU time (all process threads): 1 min 43.828 s"));
+        assert!(text.contains("Peak memory (process lifetime): 262.75 MiB"));
+        for (duration, expected) in [
+            (Duration::ZERO, "0 s"),
+            (Duration::from_nanos(42), "42 ns"),
+            (Duration::from_nanos(1250), "1.25 µs"),
+            (Duration::from_micros(125_500), "125.5 ms"),
+            (Duration::from_millis(1250), "1.25 s"),
+            (Duration::from_micros(59_999_900), "1 min"),
+            (Duration::from_secs(3661), "1 h 1 min 1 s"),
+            (Duration::from_secs(86_400), "1 d"),
+        ] {
+            assert_eq!(format_duration(duration), expected);
+        }
+        for (bytes, expected) in [
+            (0, "0 B"),
+            (1024, "1.00 KiB"),
+            (1 << 30, "1.00 GiB"),
+            (1 << 40, "1.00 TiB"),
+        ] {
+            assert_eq!(format_memory(bytes), expected);
+        }
         let missing = render(&ResourceStats {
             elapsed: Duration::ZERO,
             cpu: None,

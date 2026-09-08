@@ -113,11 +113,13 @@ Add `--stats` to append a resource summary after the findings:
 
 ```text
 Analysis resources:
-  Elapsed time: 0.125 s
-  CPU time (all process threads): 0.375 s
-  Peak memory (process lifetime): 24.50 MiB
+  Elapsed time: 1 min 34.559 s
+  CPU time (all process threads): 1 min 43.828 s
+  Peak memory (process lifetime): 262.75 MiB
   CPU and memory exclude child processes.
 ```
+
+Durations use readable units from nanoseconds through days, with minutes and seconds shown separately for longer runs. Memory automatically scales from bytes through KiB, MiB, GiB, and larger binary units.
 
 Elapsed and CPU times cover analysis, including file discovery, parsing, and detectors. Source download/cloning, configuration loading, and report formatting are outside that interval. CPU time sums the work of all QualiRS threads, so parallel analysis can use more CPU seconds than elapsed seconds. Peak memory is the process's highest resident memory usage up to the end of analysis, including earlier preparation; it is not a count of total allocations. Child processes such as Cargo and Git are excluded from CPU and memory counters.
 
