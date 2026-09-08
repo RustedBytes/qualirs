@@ -37,6 +37,12 @@ impl Detector for UnusedResultDetector {
             .any(|s| text.contains(s))
         }
         impl<'a> Visit<'a> for Discards<'_> {
+            fn visit_expr_for_loop(&mut self, n: &'a syn::ExprForLoop) {
+                let saved = self.documented;
+                self.documented |= intentional(&self.notes.leading(n.span()));
+                syn::visit::visit_expr_for_loop(self, n);
+                self.documented = saved;
+            }
             fn visit_local(&mut self, n: &'a syn::Local) {
                 if matches!(n.pat, syn::Pat::Wild(_))
                     && let Some(init) = &n.init

@@ -18,6 +18,9 @@ pub mod domain;
 pub mod private;
 pub mod unstable;
 
+// Explicit crate-relative roots support Q0004's exploratory coupling hint.
+use crate::{domain::D, private::P, unstable::U, a::A, b::B, c::C};
+
 use alpha::A;
 use beta::B;
 use gamma::C;

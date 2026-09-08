@@ -129,8 +129,7 @@ fn mentions_safety(text: &str) -> bool {
         .collect();
     let text = format!(" {} ", words.join(" "));
     words.iter().any(|w| w == "safety")
-        || text.contains(" safe because ")
-        || text.contains(" safe since ")
+        || causal_safety_note(&words)
         || text.contains("relies on the invariant")
         || text.contains("according to")
             && text.contains("documentation")
@@ -138,6 +137,31 @@ fn mentions_safety(text: &str) -> bool {
         || text.contains("do not")
             && words.iter().any(|w| w == "hold")
             && words.iter().any(|w| w == "reference" || w == "references")
+}
+
+// Natural-language explanations need not spell `SAFETY:` or put `because`
+// immediately after `safe`. Keep the causal connector close to the assertion
+// and require explanatory text on its other side. This recognizes a written
+// rationale; it does not certify that the rationale is sound.
+fn causal_safety_note(words: &[String]) -> bool {
+    words.iter().enumerate().any(|(index, word)| {
+        if word != "safe" {
+            return false;
+        }
+        let after = &words[index + 1..];
+        let reason_after = after
+            .iter()
+            .take(6)
+            .enumerate()
+            .any(|(i, w)| matches!(w.as_str(), "because" | "since") && after.len() > i + 1);
+        let reason_before = words[..index]
+            .iter()
+            .enumerate()
+            .rev()
+            .take(4)
+            .any(|(i, w)| matches!(w.as_str(), "so" | "therefore" | "hence") && i >= 3);
+        reason_after || reason_before
+    })
 }
 
 pub(crate) struct SafetyDocs(HashSet<(usize, usize)>);

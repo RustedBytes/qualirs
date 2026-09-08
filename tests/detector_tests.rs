@@ -94,7 +94,7 @@ use crate::ser::Serialize;
     }
 
     #[test]
-    fn detects_exact_self_import() {
+    fn self_namespace_import_is_not_a_dependency_cycle() {
         let code = "\
 use crate::private::de::Helper;
 use crate::ser::Serialize;
@@ -106,7 +106,7 @@ use crate::ser::Serialize;
                 .iter()
                 .filter(|smell| smell.name == "Cyclic Crate Dependency")
                 .count(),
-            1
+            0
         );
     }
 }

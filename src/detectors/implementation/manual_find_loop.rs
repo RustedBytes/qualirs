@@ -50,46 +50,42 @@ impl<'ast> Visit<'ast> for ManualFindVisitor {
 }
 
 fn loop_has_direct_conditional_return(block: &syn::Block) -> bool {
-    let mut statements = block.stmts.iter();
-    let Some(stmt) = statements.next() else {
+    let [syn::Stmt::Expr(syn::Expr::If(condition), _)] = block.stmts.as_slice() else {
         return false;
     };
-    if statements.next().is_some() {
+    if condition.else_branch.is_some() {
         return false;
     }
-
-    stmt_is_conditional_return(stmt)
+    // A predicate adapter cannot discard branch work or move an executed await
+    // or a function-level early exit into a synchronous predicate closure.
+    let [syn::Stmt::Expr(result, _)] = condition.then_branch.stmts.as_slice() else {
+        return false;
+    };
+    let mut boundary = PredicateBoundary(false);
+    boundary.visit_expr(&condition.cond);
+    expr_is_bool_return(result) && !boundary.0
 }
 
-fn stmt_is_conditional_return(stmt: &syn::Stmt) -> bool {
-    match stmt {
-        syn::Stmt::Expr(expr, _) => expr_is_conditional_return(expr),
-        syn::Stmt::Local(local) => local
-            .init
-            .as_ref()
-            .is_some_and(|init| expr_is_conditional_return(&init.expr)),
-        _ => false,
-    }
-}
-
-fn expr_is_conditional_return(expr: &syn::Expr) -> bool {
-    match expr {
-        syn::Expr::If(if_expr) => {
-            block_contains_return(&if_expr.then_branch)
-                || if_expr.else_branch.as_ref().is_some_and(|(_, else_expr)| {
-                    expr_is_bool_return(else_expr) || expr_is_conditional_return(else_expr)
-                })
+struct PredicateBoundary(bool);
+impl<'ast> Visit<'ast> for PredicateBoundary {
+    fn visit_expr(&mut self, expr: &'ast syn::Expr) {
+        if matches!(
+            expr,
+            syn::Expr::Await(_)
+                | syn::Expr::Try(_)
+                | syn::Expr::Return(_)
+                | syn::Expr::Break(_)
+                | syn::Expr::Continue(_)
+                | syn::Expr::Yield(_)
+                | syn::Expr::Macro(_)
+        ) {
+            self.0 = true;
         }
-        syn::Expr::Block(block) => loop_has_direct_conditional_return(&block.block),
-        _ => false,
+        syn::visit::visit_expr(self, expr);
     }
-}
-
-fn block_contains_return(block: &syn::Block) -> bool {
-    block.stmts.iter().any(|stmt| match stmt {
-        syn::Stmt::Expr(expr, _) => expr_is_bool_return(expr),
-        _ => false,
-    })
+    fn visit_macro(&mut self, _: &'ast syn::Macro) {
+        self.0 = true;
+    }
 }
 
 fn expr_is_bool_return(expr: &syn::Expr) -> bool {
