@@ -22,7 +22,7 @@ impl Detector for UnsafeImplSafetyDocsDetector {
                 let trait_name = imp
                     .trait_
                     .as_ref()
-                    .and_then(|(_, path, _)| path.segments.last())
+                    .and_then(|(path, _)| path.segments.last())
                     .map(|seg| seg.ident.to_string())
                     .unwrap_or_default();
                 if matches!(trait_name.as_str(), "Send" | "Sync") {

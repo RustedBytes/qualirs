@@ -348,7 +348,10 @@ mod analysis {
         sig: &syn::Signature,
         block: &syn::Block,
     ) -> bool {
-        if has_exclusion_attr(attrs) || sig.asyncness.is_some() || sig.unsafety.is_some() {
+        if has_exclusion_attr(attrs)
+            || sig.asyncness.is_some()
+            || matches!(sig.safety, syn::Safety::Unsafe(_))
+        {
             return false;
         }
 

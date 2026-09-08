@@ -62,7 +62,7 @@ fn collect_drop_types(ast: &syn::File) -> Vec<TypeInfo<'_>> {
     let mut drop_types = Vec::with_capacity(ast.items.len());
     for item in &ast.items {
         if let syn::Item::Impl(imp) = item
-            && let Some((_, trait_path, _)) = &imp.trait_
+            && let Some((trait_path, _)) = &imp.trait_
             && is_trait(trait_path, "Drop")
             && let Some(name) = extract_impl_target_name(&imp.self_ty)
         {

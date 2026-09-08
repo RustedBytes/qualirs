@@ -23,7 +23,7 @@ impl Detector for TraitImplLeakageDetector {
 
         for item in &file.ast.items {
             if let syn::Item::Impl(imp) = item
-                && let Some((_, trait_path, _)) = &imp.trait_
+                && let Some((trait_path, _)) = &imp.trait_
             {
                 let trait_name = trait_path_to_string(trait_path);
                 let kind = classify_trait(&trait_name);

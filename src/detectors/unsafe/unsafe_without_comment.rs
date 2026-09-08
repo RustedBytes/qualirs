@@ -94,7 +94,7 @@ impl<'ast, 'a> Visit<'ast> for UnsafeVisitor<'a> {
     }
 
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        if let Some(unsafety) = node.sig.unsafety {
+        if let syn::Safety::Unsafe(unsafety) = &node.sig.safety {
             let line = unsafety.span.start().line;
 
             if !has_safety_comment(self.source_lines, line) {

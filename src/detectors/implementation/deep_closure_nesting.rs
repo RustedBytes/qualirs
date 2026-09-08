@@ -53,7 +53,7 @@ impl<'ast> Visit<'ast> for ClosureDepthVisitor {
         self.depth += 1;
         if self.depth > self.threshold {
             self.findings
-                .push((node.or1_token.span.start().line, self.depth));
+                .push((node.inputs_begin.span.start().line, self.depth));
         }
         visit_expr_closure(self, node);
         self.depth -= 1;

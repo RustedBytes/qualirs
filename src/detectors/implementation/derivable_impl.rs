@@ -17,7 +17,7 @@ impl Detector for DerivableImplDetector {
 
         for item in &file.ast.items {
             if let syn::Item::Impl(imp) = item
-                && let Some((_, trait_path, _)) = &imp.trait_
+                && let Some((trait_path, _)) = &imp.trait_
                 && let Some(trait_ident) = trait_path.segments.last().map(|seg| &seg.ident)
             {
                 if !is_derivable_trait(trait_ident)

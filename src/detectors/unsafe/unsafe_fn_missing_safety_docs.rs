@@ -16,7 +16,7 @@ impl Detector for UnsafeFnMissingSafetyDocsDetector {
         let mut smells = Vec::new();
         for item in &file.ast.items {
             if let syn::Item::Fn(func) = item
-                && func.sig.unsafety.is_some()
+                && matches!(func.sig.safety, syn::Safety::Unsafe(_))
                 && is_public(&func.vis)
                 && !has_safety_docs(&func.attrs)
             {

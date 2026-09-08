@@ -86,7 +86,7 @@ impl Detector for BrokenConstructorDetector {
                                     }
                                 }
                             }
-                        } else if let Some((_, path, _)) = &imp.trait_ {
+                        } else if let Some((path, _)) = &imp.trait_ {
                             // Check for impl Default
                             if path.is_ident("Default") {
                                 has_new.insert(type_name.clone());

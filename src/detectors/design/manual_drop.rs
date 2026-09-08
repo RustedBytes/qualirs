@@ -20,7 +20,7 @@ impl Detector for ManualDropDetector {
 
         for item in &file.ast.items {
             if let syn::Item::Impl(imp) = item
-                && let Some((_, trait_path, _)) = &imp.trait_
+                && let Some((trait_path, _)) = &imp.trait_
             {
                 let trait_name = path_last(trait_path);
                 if trait_name == "Drop"

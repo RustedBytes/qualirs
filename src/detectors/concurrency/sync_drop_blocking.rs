@@ -20,7 +20,7 @@ impl Detector for SyncDropBlockingDetector {
 
         for item in &file.ast.items {
             if let syn::Item::Impl(imp) = item
-                && let Some((_, path, _)) = &imp.trait_
+                && let Some((path, _)) = &imp.trait_
                 && path.is_ident("Drop")
             {
                 let mut visitor = BlockingDropVisitor {

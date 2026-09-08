@@ -57,7 +57,7 @@ impl<'ast> Visit<'ast> for UnsafeCounter {
     }
 
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        if node.sig.unsafety.is_some() {
+        if matches!(node.sig.safety, syn::Safety::Unsafe(_)) {
             self.count += 1;
         }
         syn::visit::visit_item_fn(self, node);

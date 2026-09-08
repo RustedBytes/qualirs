@@ -419,7 +419,7 @@ fn print_code_candidate(code: &str) {
 
 fn print_smell_table(report: &AnalysisReport) {
     let mut table = Table::new();
-    table.load_preset(UTF8_FULL);
+    table.load_style(UTF8_FULL);
     table.set_header(vec![
         Cell::new("Severity"),
         Cell::new("Category"),
