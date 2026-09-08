@@ -45,36 +45,7 @@ impl Detector for ManualDefaultConstructorDetector {
                 let syn::ImplItem::Fn(f) = item else {
                     continue;
                 };
-                if f.sig.ident != "new"
-                    || !f.sig.inputs.is_empty()
-                    || f.sig.constness.is_some()
-                    || !f.sig.generics.params.is_empty()
-                    || !matches!(&f.sig.output, syn::ReturnType::Type(_, t) if matches!(&**t, syn::Type::Path(p) if p.path.is_ident("Self")))
-                {
-                    continue;
-                }
-                let [syn::Stmt::Expr(syn::Expr::Struct(body), None)] = f.block.stmts.as_slice()
-                else {
-                    continue;
-                };
-                if !body.path.is_ident("Self")
-                    || body.rest.is_some()
-                    || body.fields.is_empty()
-                    || body.fields.len() != fields.named.len()
-                {
-                    continue;
-                }
-                let defaults = fields.named.iter().all(|field| {
-                    let Some(value) = body.fields.iter().find(|v| matches!(&v.member, syn::Member::Named(n) if Some(n) == field.ident.as_ref())) else { return false; };
-                    let syn::Expr::Call(c) = &value.expr else { return false; };
-                    let syn::Expr::Path(p) = &*c.func else { return false; };
-                    if !c.args.is_empty() { return false; }
-                    let path = ctx.path(&p.path);
-                    matches!(path.as_str(), "Default::default" | "std::default::Default::default" | "core::default::Default::default")
-                        || ctx.kind(&field.ty) == Kind::Vec && matches!(path.as_str(), "Vec::new" | "std::vec::Vec::new" | "alloc::vec::Vec::new")
-                        || ctx.kind(&field.ty) == Kind::String && matches!(path.as_str(), "String::new" | "std::string::String::new" | "alloc::string::String::new")
-                });
-                if defaults {
+                if constructor_defaults(f, fields, &ctx) {
                     let line = f.sig.fn_token.span.start().line;
                     findings.push(Smell::new(SmellCategory::Idiomaticity, self.name(), Severity::Info, FindingConfidence::High,
                         SourceLocation::new(file.path.clone(), line, line, None),
@@ -100,4 +71,62 @@ fn is_default(path: &str) -> bool {
         path,
         "Default" | "std::default::Default" | "core::default::Default"
     )
+}
+
+fn constructor_defaults(f: &syn::ImplItemFn, fields: &syn::FieldsNamed, ctx: &Context) -> bool {
+    if f.sig.ident != "new"
+        || !f.sig.inputs.is_empty()
+        || f.sig.constness.is_some()
+        || !f.sig.generics.params.is_empty()
+        || !matches!(&f.sig.output, syn::ReturnType::Type(_, t) if matches!(&**t, syn::Type::Path(p) if p.path.is_ident("Self")))
+    {
+        return false;
+    }
+    let [syn::Stmt::Expr(syn::Expr::Struct(body), None)] = f.block.stmts.as_slice() else {
+        return false;
+    };
+    if !body.path.is_ident("Self")
+        || body.rest.is_some()
+        || body.fields.is_empty()
+        || body.fields.len() != fields.named.len()
+    {
+        return false;
+    }
+    fields
+        .named
+        .iter()
+        .all(|field| field_is_default(field, body, ctx))
+}
+
+fn field_is_default(field: &syn::Field, body: &syn::ExprStruct, ctx: &Context) -> bool {
+    let Some(value) = body
+        .fields
+        .iter()
+        .find(|v| matches!(&v.member, syn::Member::Named(n) if Some(n) == field.ident.as_ref()))
+    else {
+        return false;
+    };
+    let syn::Expr::Call(c) = &value.expr else {
+        return false;
+    };
+    let syn::Expr::Path(p) = &*c.func else {
+        return false;
+    };
+    if !c.args.is_empty() {
+        return false;
+    }
+    let path = ctx.path(&p.path);
+    matches!(
+        path.as_str(),
+        "Default::default" | "std::default::Default::default" | "core::default::Default::default"
+    ) || ctx.kind(&field.ty) == Kind::Vec
+        && matches!(
+            path.as_str(),
+            "Vec::new" | "std::vec::Vec::new" | "alloc::vec::Vec::new"
+        )
+        || ctx.kind(&field.ty) == Kind::String
+            && matches!(
+                path.as_str(),
+                "String::new" | "std::string::String::new" | "alloc::string::String::new"
+            )
 }

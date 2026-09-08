@@ -24,32 +24,9 @@ impl Detector for RepeatedRegexConstructionDetector {
     fn detect(&self, file: &SourceFile) -> Vec<Smell> {
         let mut candidates = HashMap::new();
         evidence::inspect(&file.ast, |expr, ctx| {
-            let syn::Expr::Call(call) = expr else {
-                return;
-            };
-            let syn::Expr::Path(path) = &*call.func else {
-                return;
-            };
-            let resolved = ctx.path(&path.path);
-            let known = matches!(
-                resolved.as_str(),
-                "regex::Regex::new" | "regex::bytes::Regex::new" | "regex_lite::Regex::new"
-            );
-            if !known && resolved != "Regex::new" {
-                return;
+            if let Some((key, candidate)) = regex_candidate(expr, ctx) {
+                candidates.insert(key, candidate);
             }
-            let literal = matches!(call.args.first(), Some(syn::Expr::Lit(l)) if matches!(l.lit, syn::Lit::Str(_)));
-            candidates.insert(
-                evidence::span_key(call.span()),
-                (
-                    ctx.loop_depth > 0,
-                    if known && literal {
-                        FindingConfidence::High
-                    } else {
-                        FindingConfidence::Low
-                    },
-                ),
-            );
         });
         let mut visitor = RegexVisitor {
             loop_depth: 0,
@@ -169,4 +146,37 @@ fn is_lazy_initializer(path: &str) -> bool {
 
 fn is_lazy_initializer_method(method: &str) -> bool {
     matches!(method, "get_or_init" | "get_or_try_init")
+}
+
+fn regex_candidate(
+    expr: &syn::Expr,
+    ctx: &evidence::Context,
+) -> Option<((usize, usize, usize, usize), (bool, FindingConfidence))> {
+    let syn::Expr::Call(call) = expr else {
+        return None;
+    };
+    let syn::Expr::Path(path) = &*call.func else {
+        return None;
+    };
+    let resolved = ctx.path(&path.path);
+    let known = matches!(
+        resolved.as_str(),
+        "regex::Regex::new" | "regex::bytes::Regex::new" | "regex_lite::Regex::new"
+    );
+    if !known && resolved != "Regex::new" {
+        return None;
+    }
+    let literal =
+        matches!(call.args.first(), Some(syn::Expr::Lit(l)) if matches!(l.lit, syn::Lit::Str(_)));
+    Some((
+        evidence::span_key(call.span()),
+        (
+            ctx.loop_depth > 0,
+            if known && literal {
+                FindingConfidence::High
+            } else {
+                FindingConfidence::Low
+            },
+        ),
+    ))
 }

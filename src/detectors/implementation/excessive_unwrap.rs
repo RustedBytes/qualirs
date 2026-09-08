@@ -50,37 +50,8 @@ impl Detector for ExcessiveUnwrapDetector {
         let mut types = Types(HashMap::new());
         types.visit_file(&file.ast);
         evidence::inspect(&file.ast, |expr, ctx| {
-            if let syn::Expr::Call(c) = expr
-                && let syn::Expr::Path(p) = &*c.func
-            {
-                let path = ctx.path(&p.path);
-                if let Some((scalar, method)) = path.split_once("::")
-                    && matches!(method, "from_le_bytes" | "from_be_bytes" | "from_ne_bytes")
-                    && let Some(size) = scalar_width(scalar)
-                    && let Some(arg) = c.args.first()
-                    && exact_array_conversion(arg, size, ctx, &types.0)
-                {
-                    infallible.insert(evidence::span_key(arg.span()));
-                }
-            }
-            if let syn::Expr::MethodCall(c) = expr
-                && matches!(c.method.to_string().as_str(), "unwrap" | "expect")
-            {
-                if matches!(ctx.expr(&c.receiver), Kind::Result(_)) {
-                    fallible.insert(evidence::span_key(c.span()));
-                }
-                if let syn::Expr::Call(init) = &*c.receiver
-                    && let syn::Expr::Path(p) = &*init.func
-                    && matches!(
-                        ctx.path(&p.path).as_str(),
-                        "std::ffi::CString::new" | "alloc::ffi::CString::new"
-                    )
-                    && let Some(syn::Expr::Lit(lit)) = init.args.first()
-                    && matches!(&lit.lit, syn::Lit::Str(s) if !s.value().contains('\0'))
-                {
-                    infallible.insert(evidence::span_key(c.span()));
-                }
-            }
+            record_scalar_conversion(expr, ctx, &types.0, &mut infallible);
+            record_unwrap_evidence(expr, ctx, &mut infallible, &mut fallible);
         });
 
         for item in &file.ast.items {
@@ -187,47 +158,10 @@ fn exact_array_conversion(
     else {
         return false;
     };
-    fn byte_storage(ty: &syn::Type, ctx: &evidence::Context) -> bool {
-        match ty {
-            syn::Type::Reference(r) => byte_storage(&r.elem, ctx),
-            syn::Type::Slice(s) => {
-                matches!(&*s.elem, syn::Type::Path(p) if ctx.path(&p.path) == "u8")
-            }
-            syn::Type::Array(a) => {
-                matches!(&*a.elem, syn::Type::Path(p) if ctx.path(&p.path) == "u8")
-            }
-            _ => false,
-        }
-    }
     if !byte_storage(ty, ctx) {
         return false;
     }
-    let syn::Expr::Range(range) = &*index.index else {
-        return false;
-    };
-    if !matches!(range.limits, syn::RangeLimits::HalfOpen(_)) {
-        return false;
-    }
-    let (Some(start), Some(end)) = (&range.start, &range.end) else {
-        return false;
-    };
-    fn number(e: &syn::Expr) -> Option<usize> {
-        if let syn::Expr::Lit(l) = e
-            && let syn::Lit::Int(n) = &l.lit
-        {
-            n.base10_parse().ok()
-        } else {
-            None
-        }
-    }
-    if let (Some(a), Some(b)) = (number(start), number(end)) {
-        return b.checked_sub(a) == Some(width);
-    }
-    if !matches!(&**start, syn::Expr::Path(p) if p.path.get_ident().is_some()) {
-        return false;
-    }
-    matches!(&**end, syn::Expr::Binary(b) if matches!(b.op, syn::BinOp::Add(_))
-        && b.left.to_token_stream().to_string() == start.to_token_stream().to_string() && number(&b.right) == Some(width))
+    slice_width_matches(&index.index, width)
 }
 
 fn is_regex_literal_constructor(expr: &syn::Expr) -> bool {
@@ -252,4 +186,94 @@ fn is_regex_literal_constructor(expr: &syn::Expr) -> bool {
         && call.args.first().is_some_and(
             |arg| matches!(arg, syn::Expr::Lit(lit) if matches!(lit.lit, syn::Lit::Str(_))),
         )
+}
+
+fn byte_storage(ty: &syn::Type, ctx: &evidence::Context) -> bool {
+    match ty {
+        syn::Type::Reference(r) => byte_storage(&r.elem, ctx),
+        syn::Type::Slice(s) => {
+            matches!(&*s.elem, syn::Type::Path(p) if ctx.path(&p.path) == "u8")
+        }
+        syn::Type::Array(a) => {
+            matches!(&*a.elem, syn::Type::Path(p) if ctx.path(&p.path) == "u8")
+        }
+        _ => false,
+    }
+}
+
+fn number(e: &syn::Expr) -> Option<usize> {
+    if let syn::Expr::Lit(l) = e
+        && let syn::Lit::Int(n) = &l.lit
+    {
+        n.base10_parse().ok()
+    } else {
+        None
+    }
+}
+
+fn slice_width_matches(expr: &syn::Expr, width: usize) -> bool {
+    let syn::Expr::Range(range) = expr else {
+        return false;
+    };
+    if !matches!(range.limits, syn::RangeLimits::HalfOpen(_)) {
+        return false;
+    }
+    let (Some(start), Some(end)) = (&range.start, &range.end) else {
+        return false;
+    };
+    if let (Some(a), Some(b)) = (number(start), number(end)) {
+        return b.checked_sub(a) == Some(width);
+    }
+    if !matches!(&**start, syn::Expr::Path(p) if p.path.get_ident().is_some()) {
+        return false;
+    }
+    matches!(&**end, syn::Expr::Binary(b) if matches!(b.op, syn::BinOp::Add(_))
+        && b.left.to_token_stream().to_string() == start.to_token_stream().to_string() && number(&b.right) == Some(width))
+}
+
+fn record_scalar_conversion(
+    expr: &syn::Expr,
+    ctx: &evidence::Context,
+    types: &HashMap<(usize, usize), syn::Type>,
+    infallible: &mut HashSet<(usize, usize, usize, usize)>,
+) {
+    if let syn::Expr::Call(c) = expr
+        && let syn::Expr::Path(p) = &*c.func
+    {
+        let path = ctx.path(&p.path);
+        if let Some((scalar, method)) = path.split_once("::")
+            && matches!(method, "from_le_bytes" | "from_be_bytes" | "from_ne_bytes")
+            && let Some(size) = scalar_width(scalar)
+            && let Some(arg) = c.args.first()
+            && exact_array_conversion(arg, size, ctx, types)
+        {
+            infallible.insert(evidence::span_key(arg.span()));
+        }
+    }
+}
+
+fn record_unwrap_evidence(
+    expr: &syn::Expr,
+    ctx: &evidence::Context,
+    infallible: &mut HashSet<(usize, usize, usize, usize)>,
+    fallible: &mut HashSet<(usize, usize, usize, usize)>,
+) {
+    if let syn::Expr::MethodCall(c) = expr
+        && matches!(c.method.to_string().as_str(), "unwrap" | "expect")
+    {
+        if matches!(ctx.expr(&c.receiver), Kind::Result(_)) {
+            fallible.insert(evidence::span_key(c.span()));
+        }
+        if let syn::Expr::Call(init) = &*c.receiver
+            && let syn::Expr::Path(p) = &*init.func
+            && matches!(
+                ctx.path(&p.path).as_str(),
+                "std::ffi::CString::new" | "alloc::ffi::CString::new"
+            )
+            && let Some(syn::Expr::Lit(lit)) = init.args.first()
+            && matches!(&lit.lit, syn::Lit::Str(s) if !s.value().contains('\0'))
+        {
+            infallible.insert(evidence::span_key(c.span()));
+        }
+    }
 }

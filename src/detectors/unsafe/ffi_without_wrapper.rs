@@ -23,60 +23,19 @@ impl Detector for FfiWithoutWrapperDetector {
 }
 
 fn inspect_module(items: &[syn::Item], file: &SourceFile, findings: &mut Vec<Smell>) {
-    let mut declarations = Vec::new();
+    let declarations = foreign_declarations(items);
     for item in items {
-        match item {
-            syn::Item::ForeignMod(m) => {
-                for item in &m.items {
-                    if let syn::ForeignItem::Fn(f) = item {
-                        declarations
-                            .push((f.sig.ident.to_string(), f.sig.fn_token.span.start().line));
-                    }
-                }
-            }
-            syn::Item::Mod(m) if !crate::detectors::policy::has_test_cfg(&m.attrs) => {
-                if let Some((_, items)) = &m.content {
-                    inspect_module(items, file, findings);
-                }
-            }
-            _ => {}
+        if let syn::Item::Mod(m) = item
+            && !crate::detectors::policy::has_test_cfg(&m.attrs)
+            && let Some((_, nested)) = &m.content
+        {
+            inspect_module(nested, file, findings);
         }
     }
     if declarations.is_empty() {
         return;
     }
-    // Analyze one lexical module at a time. A similarly named wrapper in another
-    // module, or an unrelated function with a matching name, proves nothing.
-    let ast = syn::File {
-        frontmatter: None,
-        shebang: None,
-        attrs: Vec::new(),
-        items: items.to_vec(),
-    };
-    let mut callers = SafeCalls {
-        safe: false,
-        calls: HashSet::new(),
-    };
-    callers.visit_file(&ast);
-    let mut wrapped = HashSet::new();
-    evidence::inspect(&ast, |expr, ctx| {
-        if !callers.calls.contains(&evidence::span_key(expr.span())) {
-            return;
-        }
-        let syn::Expr::Call(c) = expr else {
-            return;
-        };
-        let syn::Expr::Path(p) = &*c.func else {
-            return;
-        };
-        let resolved = ctx.path(&p.path);
-        wrapped.insert(
-            resolved
-                .strip_prefix("self::")
-                .unwrap_or(&resolved)
-                .to_string(),
-        );
-    });
+    let wrapped = safe_call_targets(items);
     for (name, line) in declarations {
         if wrapped.contains(&name) {
             continue;
@@ -126,4 +85,62 @@ impl<'a> Visit<'a> for SafeCalls {
         }
         syn::visit::visit_expr_call(self, n);
     }
+}
+
+fn safe_call_targets(items: &[syn::Item]) -> HashSet<String> {
+    // Analyze one lexical module at a time. A similarly named wrapper in another
+    // module, or an unrelated function with a matching name, proves nothing.
+    let ast = syn::File {
+        frontmatter: None,
+        shebang: None,
+        attrs: Vec::new(),
+        items: items.to_vec(),
+    };
+    let mut callers = SafeCalls {
+        safe: false,
+        calls: HashSet::new(),
+    };
+    callers.visit_file(&ast);
+    let mut wrapped = HashSet::new();
+    evidence::inspect(&ast, |expr, ctx| {
+        if !callers.calls.contains(&evidence::span_key(expr.span())) {
+            return;
+        }
+        let syn::Expr::Call(c) = expr else {
+            return;
+        };
+        let syn::Expr::Path(p) = &*c.func else {
+            return;
+        };
+        let resolved = ctx.path(&p.path);
+        wrapped.insert(
+            resolved
+                .strip_prefix("self::")
+                .unwrap_or(&resolved)
+                .to_string(),
+        );
+    });
+    wrapped
+}
+
+fn foreign_declarations(items: &[syn::Item]) -> Vec<(String, usize)> {
+    let capacity = items
+        .iter()
+        .map(|item| match item {
+            syn::Item::ForeignMod(m) => m.items.len(),
+            _ => 0,
+        })
+        .sum();
+    let mut declarations = Vec::with_capacity(capacity);
+    for item in items {
+        let syn::Item::ForeignMod(module) = item else {
+            continue;
+        };
+        for item in &module.items {
+            if let syn::ForeignItem::Fn(f) = item {
+                declarations.push((f.sig.ident.to_string(), f.sig.fn_token.span.start().line));
+            }
+        }
+    }
+    declarations
 }

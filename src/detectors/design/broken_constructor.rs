@@ -27,71 +27,14 @@ impl Detector for BrokenConstructorDetector {
 
         for item in &file.ast.items {
             match item {
-                syn::Item::Struct(s) => {
-                    if is_dto_template_or_config_struct(s) {
-                        continue;
-                    }
-                    let all_pub = match &s.fields {
-                        syn::Fields::Named(named) => named
-                            .named
-                            .iter()
-                            .all(|f| matches!(f.vis, syn::Visibility::Public(_))),
-                        syn::Fields::Unnamed(unnamed) => unnamed
-                            .unnamed
-                            .iter()
-                            .all(|f| matches!(f.vis, syn::Visibility::Public(_))),
-                        syn::Fields::Unit => false,
-                    };
-                    let field_count = match &s.fields {
-                        syn::Fields::Named(named) => named.named.len(),
-                        syn::Fields::Unnamed(unnamed) => unnamed.unnamed.len(),
-                        syn::Fields::Unit => 0,
-                    };
-                    let has_default_derive = s.attrs.iter().any(|attr| {
-                        if attr.path().is_ident("derive") {
-                            if let Ok(nested) = attr.parse_args_with(syn::punctuated::Punctuated::<syn::Meta, syn::token::Comma>::parse_terminated) {
-                                nested.iter().any(|m| m.path().is_ident("Default"))
-                            } else { false }
-                        } else { false }
-                    });
-
-                    structs.push(StructInfo {
-                        id: StructIdentity {
-                            name: s.ident.to_string(),
-                            line: line_of_struct(s),
-                        },
-                        all_pub,
-                        field_count,
-                        has_default_derive,
-                        has_phantom_data_field: has_phantom_data_field(s),
-                    });
+                syn::Item::Struct(s) if !is_dto_template_or_config_struct(s) => {
+                    structs.push(StructInfo::from_struct(s));
                 }
-                syn::Item::Impl(imp) => {
+                syn::Item::Impl(imp) if provides_constructor(imp) => {
                     if let syn::Type::Path(tp) = &*imp.self_ty
                         && let Some(seg) = tp.path.segments.last()
                     {
-                        let type_name = seg.ident.to_string();
-
-                        // Check for new() or other constructors
-                        if imp.trait_.is_none() {
-                            for item in &imp.items {
-                                if let syn::ImplItem::Fn(method) = item {
-                                    let method_name = method.sig.ident.to_string();
-                                    if method_name == "new"
-                                        || method_name.starts_with("from_")
-                                        || method_name.starts_with("with_")
-                                        || method_name.starts_with("parse_")
-                                    {
-                                        has_new.insert(type_name.clone());
-                                    }
-                                }
-                            }
-                        } else if let Some((path, _)) = &imp.trait_ {
-                            // Check for impl Default
-                            if path.is_ident("Default") {
-                                has_new.insert(type_name.clone());
-                            }
-                        }
+                        has_new.insert(seg.ident.to_string());
                     }
                 }
                 _ => {}
@@ -176,4 +119,49 @@ fn type_contains_ident(ty: &syn::Type, ident: &str) -> bool {
             .any(|segment| segment.ident == ident),
         _ => false,
     }
+}
+
+impl StructInfo {
+    fn from_struct(s: &syn::ItemStruct) -> Self {
+        Self {
+            id: StructIdentity {
+                name: s.ident.to_string(),
+                line: line_of_struct(s),
+            },
+            all_pub: !matches!(s.fields, syn::Fields::Unit)
+                && s.fields
+                    .iter()
+                    .all(|f| matches!(f.vis, syn::Visibility::Public(_))),
+            field_count: s.fields.len(),
+            has_default_derive: derives_default(&s.attrs),
+            has_phantom_data_field: has_phantom_data_field(s),
+        }
+    }
+}
+
+fn derives_default(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("derive")
+            && attr
+                .parse_args_with(
+                    syn::punctuated::Punctuated::<syn::Meta, syn::token::Comma>::parse_terminated,
+                )
+                .is_ok_and(|nested| nested.iter().any(|m| m.path().is_ident("Default")))
+    })
+}
+
+fn provides_constructor(imp: &syn::ItemImpl) -> bool {
+    if let Some((path, _)) = &imp.trait_ {
+        return path.is_ident("Default");
+    }
+    imp.items.iter().any(|item| {
+        let syn::ImplItem::Fn(method) = item else {
+            return false;
+        };
+        let name = method.sig.ident.to_string();
+        name == "new"
+            || ["from_", "with_", "parse_"]
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+    })
 }

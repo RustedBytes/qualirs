@@ -154,12 +154,9 @@ fn causal_safety_note(words: &[String]) -> bool {
             .take(6)
             .enumerate()
             .any(|(i, w)| matches!(w.as_str(), "because" | "since") && after.len() > i + 1);
-        let reason_before = words[..index]
+        let reason_before = words[index.saturating_sub(4).max(3).min(index)..index]
             .iter()
-            .enumerate()
-            .rev()
-            .take(4)
-            .any(|(i, w)| matches!(w.as_str(), "so" | "therefore" | "hence") && i >= 3);
+            .any(|w| matches!(w.as_str(), "so" | "therefore" | "hence"));
         reason_after || reason_before
     })
 }
@@ -337,35 +334,6 @@ impl<'a> Visit<'a> for SafetyVisitor {
 /// a synchronous closure in the associated statement. This associates written
 /// explanations only; it does not carry execution state into a deferred body.
 fn documented_closure_call(stmt: &syn::Stmt, note: &str) -> Option<Span> {
-    struct Calls<'a> {
-        words: HashSet<&'a str>,
-        in_closure: bool,
-        unsafe_count: usize,
-        documented: Option<Span>,
-    }
-    impl<'a> Visit<'a> for Calls<'_> {
-        fn visit_item(&mut self, _: &'a syn::Item) {}
-        fn visit_expr_async(&mut self, _: &'a syn::ExprAsync) {}
-        fn visit_expr_closure(&mut self, n: &'a syn::ExprClosure) {
-            if self.in_closure || n.asyncness.is_some() {
-                return;
-            }
-            self.in_closure = true;
-            self.visit_expr(&n.body);
-            self.in_closure = false;
-        }
-        fn visit_expr_unsafe(&mut self, n: &'a syn::ExprUnsafe) {
-            self.unsafe_count += 1;
-            if self.in_closure
-                && let [syn::Stmt::Expr(syn::Expr::Call(call), _)] = n.block.stmts.as_slice()
-                && let syn::Expr::Path(path) = &*call.func
-                && let Some(name) = path.path.segments.last()
-                && self.words.contains(name.ident.to_string().as_str())
-            {
-                self.documented = Some(n.unsafe_token.span);
-            }
-        }
-    }
     let words: HashSet<_> = note
         .split(|c: char| !c.is_alphanumeric() && c != '_')
         .filter(|word| !word.is_empty())
@@ -385,7 +353,7 @@ fn documented_closure_call(stmt: &syn::Stmt, note: &str) -> Option<Span> {
     {
         return None;
     }
-    let mut calls = Calls {
+    let mut calls = DocumentedClosureCalls {
         words,
         in_closure: false,
         unsafe_count: 0,
@@ -452,5 +420,35 @@ fn unsafe_call(stmt: &syn::Stmt) -> Option<String> {
         calls.0.pop()
     } else {
         None
+    }
+}
+
+struct DocumentedClosureCalls<'a> {
+    words: HashSet<&'a str>,
+    in_closure: bool,
+    unsafe_count: usize,
+    documented: Option<Span>,
+}
+impl<'a> Visit<'a> for DocumentedClosureCalls<'_> {
+    fn visit_item(&mut self, _: &'a syn::Item) {}
+    fn visit_expr_async(&mut self, _: &'a syn::ExprAsync) {}
+    fn visit_expr_closure(&mut self, n: &'a syn::ExprClosure) {
+        if self.in_closure || n.asyncness.is_some() {
+            return;
+        }
+        self.in_closure = true;
+        self.visit_expr(&n.body);
+        self.in_closure = false;
+    }
+    fn visit_expr_unsafe(&mut self, n: &'a syn::ExprUnsafe) {
+        self.unsafe_count += 1;
+        if self.in_closure
+            && let [syn::Stmt::Expr(syn::Expr::Call(call), _)] = n.block.stmts.as_slice()
+            && let syn::Expr::Path(path) = &*call.func
+            && let Some(name) = path.path.segments.last()
+            && self.words.contains(name.ident.to_string().as_str())
+        {
+            self.documented = Some(n.unsafe_token.span);
+        }
     }
 }

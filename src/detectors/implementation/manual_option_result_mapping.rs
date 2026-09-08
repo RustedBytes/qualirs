@@ -20,42 +20,7 @@ impl Detector for ManualOptionResultMappingDetector {
     fn detect(&self, file: &SourceFile) -> Vec<Smell> {
         let mut findings = Vec::new();
         evidence::inspect(&file.ast, |expr, ctx| {
-            let syn::Expr::Match(node) = expr else {
-                return;
-            };
-            if ctx.in_const {
-                return;
-            }
-            let [first, second] = node.arms.as_slice() else {
-                return;
-            };
-            let Some(a) = arm_shape(first, ctx) else {
-                return;
-            };
-            let Some(b) = arm_shape(second, ctx) else {
-                return;
-            };
-            let paired = matches!(
-                (a.0, b.0),
-                (Variant::Some, Variant::None)
-                    | (Variant::None, Variant::Some)
-                    | (Variant::Ok, Variant::Err)
-                    | (Variant::Err, Variant::Ok)
-            );
-            if !paired {
-                return;
-            }
-            // Transforming both Result branches may require conflicting closure captures.
-            let confidence = if matches!(a.0, Variant::Ok | Variant::Err) && !a.1 && !b.1 {
-                FindingConfidence::Low
-            } else {
-                FindingConfidence::High
-            };
-            let line = node.match_token.span.start().line;
-            findings.push(Smell::new(SmellCategory::Idiomaticity, self.name(), Severity::Info,
-                confidence, SourceLocation::new(file.path.clone(), line, line, None),
-                "Match expression manually maps Option or Result variants",
-                "Consider map or map_err if closure captures and borrowing permit an equivalent transformation."));
+            findings.extend(mapping_finding(expr, ctx, file));
         });
         findings
     }
@@ -88,21 +53,7 @@ fn variant(path: &syn::Path, ctx: &Context) -> Option<Variant> {
 }
 
 fn arm_shape(arm: &syn::Arm, ctx: &Context) -> Option<(Variant, bool)> {
-    let (pattern, binding) = match &arm.pat {
-        syn::Pat::TupleStruct(p) if p.elems.len() == 1 => {
-            let binding = match p.elems.first()? {
-                syn::Pat::Ident(p) if p.by_ref.is_none() && p.subpat.is_none() => Some(&p.ident),
-                syn::Pat::Wild(_) => None,
-                _ => return None,
-            };
-            (variant(&p.path, ctx)?, binding)
-        }
-        syn::Pat::Path(p) => (variant(&p.path, ctx)?, None),
-        syn::Pat::Ident(p) if p.by_ref.is_none() && p.subpat.is_none() => {
-            (variant(&syn::Path::from(p.ident.clone()), ctx)?, None)
-        }
-        _ => return None, // Guards and refutable subpatterns cannot become map closures.
-    };
+    let (pattern, binding) = mapping_pattern(&arm.pat, ctx)?;
     let body = transparent_expr(&arm.body);
     if pattern == Variant::None {
         return matches!(body, syn::Expr::Path(p) if variant(&p.path, ctx) == Some(Variant::None))
@@ -156,4 +107,69 @@ impl<'a> Visit<'a> for ClosureBoundary {
         }
         syn::visit::visit_expr(self, expr);
     }
+}
+
+fn mapping_finding(expr: &syn::Expr, ctx: &evidence::Context, file: &SourceFile) -> Option<Smell> {
+    let syn::Expr::Match(node) = expr else {
+        return None;
+    };
+    if ctx.in_const {
+        return None;
+    }
+    let [first, second] = node.arms.as_slice() else {
+        return None;
+    };
+    let Some(a) = arm_shape(first, ctx) else {
+        return None;
+    };
+    let Some(b) = arm_shape(second, ctx) else {
+        return None;
+    };
+    let paired = matches!(
+        (a.0, b.0),
+        (Variant::Some, Variant::None)
+            | (Variant::None, Variant::Some)
+            | (Variant::Ok, Variant::Err)
+            | (Variant::Err, Variant::Ok)
+    );
+    if !paired {
+        return None;
+    }
+    // Transforming both Result branches may require conflicting closure captures.
+    let confidence = if matches!(a.0, Variant::Ok | Variant::Err) && !a.1 && !b.1 {
+        FindingConfidence::Low
+    } else {
+        FindingConfidence::High
+    };
+    let line = node.match_token.span.start().line;
+    Some(Smell::new(
+        SmellCategory::Idiomaticity,
+        ManualOptionResultMappingDetector.name(),
+        Severity::Info,
+        confidence,
+        SourceLocation::new(file.path.clone(), line, line, None),
+        "Match expression manually maps Option or Result variants",
+        "Consider map or map_err if closure captures and borrowing permit an equivalent transformation.",
+    ))
+}
+
+fn mapping_pattern<'a>(
+    pat: &'a syn::Pat,
+    ctx: &Context,
+) -> Option<(Variant, Option<&'a syn::Ident>)> {
+    Some(match pat {
+        syn::Pat::TupleStruct(p) if p.elems.len() == 1 => {
+            let binding = match p.elems.first()? {
+                syn::Pat::Ident(p) if p.by_ref.is_none() && p.subpat.is_none() => Some(&p.ident),
+                syn::Pat::Wild(_) => None,
+                _ => return None,
+            };
+            (variant(&p.path, ctx)?, binding)
+        }
+        syn::Pat::Path(p) => (variant(&p.path, ctx)?, None),
+        syn::Pat::Ident(p) if p.by_ref.is_none() && p.subpat.is_none() => {
+            (variant(&syn::Path::from(p.ident.clone()), ctx)?, None)
+        }
+        _ => return None, // Guards and refutable subpatterns cannot become map closures.
+    })
 }

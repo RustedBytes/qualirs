@@ -24,71 +24,12 @@ impl Detector for LocalLockInSingleThreadedScopeDetector {
         locals.visit_file(&file.ast);
         let mut locks: HashMap<(usize, usize), Lock> = HashMap::new();
         evidence::inspect(&file.ast, |expr, ctx| {
-            if let Some((origin, name)) = locals.0.get(&evidence::span_key(expr.span()))
-                && let syn::Expr::Call(call) = expr
-                && let syn::Expr::Path(path) = &*call.func
-            {
-                let kind = match ctx.path(&path.path).as_str() {
-                    "std::sync::Mutex::new" => Some("Mutex"),
-                    "std::sync::RwLock::new" => Some("RwLock"),
-                    _ => None,
-                };
-                if let Some(kind) = kind {
-                    locks.insert(
-                        *origin,
-                        Lock {
-                            name: name.clone(),
-                            kind,
-                            execution: ctx.execution,
-                            uses: 0,
-                            locking_uses: 0,
-                            escaped: false,
-                            line: None,
-                        },
-                    );
-                }
-            }
-            if let syn::Expr::Path(_) = expr
-                && let Some(origin) = ctx.binding_origin(expr)
-                && let Some(lock) = locks.get_mut(&origin)
-            {
-                lock.uses += 1;
-                lock.escaped |= ctx.execution != lock.execution;
-            }
-            if let syn::Expr::MethodCall(call) = expr
-                && matches!(call.method.to_string().as_str(), "lock" | "read" | "write")
-                && call.args.is_empty()
-                && ctx.expr(&call.receiver) == Kind::SyncLock
-                && let Some(origin) = ctx.binding_origin(&call.receiver)
-                && let Some(lock) = locks.get_mut(&origin)
-            {
-                lock.locking_uses += 1;
-                lock.line.get_or_insert(call.method.span().start().line);
-            }
-            if let syn::Expr::Macro(mac) = expr {
-                for (origin, lock) in &mut locks {
-                    let path: syn::Expr = syn::parse_str(&lock.name).unwrap();
-                    if ctx.binding_origin(&path) == Some(*origin)
-                        && macro_mentions_any_ident(&mac.mac, &HashSet::from([lock.name.clone()]))
-                    {
-                        lock.escaped = true;
-                    }
-                }
-            }
+            record_lock_construction(expr, ctx, &locals, &mut locks);
+            observe_lock_uses(expr, ctx, &mut locks);
         });
         let mut findings = Vec::new();
         for lock in locks.values() {
-            // Inspect every later use before claiming the value is unshared.
-            // Borrows, moves, aliases, macros, and deferred uses invalidate that claim.
-            if lock.escaped || lock.uses != lock.locking_uses {
-                continue;
-            }
-            if let Some(line) = lock.line {
-                findings.push(Smell::new(SmellCategory::Performance, self.name(), Severity::Info,
-                    FindingConfidence::High, SourceLocation::new(file.path.clone(), line, line, None),
-                    format!("Local standard {} binding '{}' is used only for locking in one execution scope", lock.kind, lock.name),
-                    "Consider plain mutable state when synchronization and poisoning semantics are unnecessary."));
-            }
+            findings.extend(lock.finding(file));
         }
         findings.sort_by_key(|f| f.location.line_start);
         findings
@@ -124,5 +65,97 @@ impl<'a> Visit<'a> for Locals {
             );
         }
         syn::visit::visit_local(self, n);
+    }
+}
+
+fn observe_lock_uses(
+    expr: &syn::Expr,
+    ctx: &evidence::Context,
+    locks: &mut HashMap<Position, Lock>,
+) {
+    if let syn::Expr::Path(_) = expr
+        && let Some(origin) = ctx.binding_origin(expr)
+        && let Some(lock) = locks.get_mut(&origin)
+    {
+        lock.uses += 1;
+        lock.escaped |= ctx.execution != lock.execution;
+    }
+    if let syn::Expr::MethodCall(call) = expr
+        && matches!(call.method.to_string().as_str(), "lock" | "read" | "write")
+        && call.args.is_empty()
+        && ctx.expr(&call.receiver) == Kind::SyncLock
+        && let Some(origin) = ctx.binding_origin(&call.receiver)
+        && let Some(lock) = locks.get_mut(&origin)
+    {
+        lock.locking_uses += 1;
+        lock.line.get_or_insert(call.method.span().start().line);
+    }
+    if let syn::Expr::Macro(mac) = expr {
+        for (origin, lock) in locks {
+            let path: syn::Expr = syn::parse_str(&lock.name).unwrap();
+            if ctx.binding_origin(&path) == Some(*origin)
+                && macro_mentions_any_ident(&mac.mac, &HashSet::from([lock.name.clone()]))
+            {
+                lock.escaped = true;
+            }
+        }
+    }
+}
+
+impl Lock {
+    fn finding(&self, file: &SourceFile) -> Option<Smell> {
+        // Inspect every later use before claiming the value is unshared.
+        // Borrows, moves, aliases, macros, and deferred uses invalidate that claim.
+        if self.escaped || self.uses != self.locking_uses {
+            return None;
+        }
+        if let Some(line) = self.line {
+            Some(Smell::new(
+                SmellCategory::Performance,
+                LocalLockInSingleThreadedScopeDetector.name(),
+                Severity::Info,
+                FindingConfidence::High,
+                SourceLocation::new(file.path.clone(), line, line, None),
+                format!(
+                    "Local standard {} binding '{}' is used only for locking in one execution scope",
+                    self.kind, self.name
+                ),
+                "Consider plain mutable state when synchronization and poisoning semantics are unnecessary.",
+            ))
+        } else {
+            None
+        }
+    }
+}
+
+fn record_lock_construction(
+    expr: &syn::Expr,
+    ctx: &evidence::Context,
+    locals: &Locals,
+    locks: &mut HashMap<Position, Lock>,
+) {
+    if let Some((origin, name)) = locals.0.get(&evidence::span_key(expr.span()))
+        && let syn::Expr::Call(call) = expr
+        && let syn::Expr::Path(path) = &*call.func
+    {
+        let kind = match ctx.path(&path.path).as_str() {
+            "std::sync::Mutex::new" => Some("Mutex"),
+            "std::sync::RwLock::new" => Some("RwLock"),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            locks.insert(
+                *origin,
+                Lock {
+                    name: name.clone(),
+                    kind,
+                    execution: ctx.execution,
+                    uses: 0,
+                    locking_uses: 0,
+                    escaped: false,
+                    line: None,
+                },
+            );
+        }
     }
 }

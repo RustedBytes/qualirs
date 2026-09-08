@@ -24,7 +24,7 @@ impl Detector for FfiTypeNotReprCDetector {
                         && !has_repr_c(&strukt.attrs) =>
                 {
                     let line = strukt.struct_token.span.start().line;
-                    smells.push(smell(file, line, &strukt.ident.to_string()));
+                    smells.push(smell(file, line, &strukt.ident));
                 }
                 syn::Item::Enum(enm)
                     if is_public(&enm.vis)
@@ -33,7 +33,7 @@ impl Detector for FfiTypeNotReprCDetector {
                         && !has_repr_c(&enm.attrs) =>
                 {
                     let line = enm.enum_token.span.start().line;
-                    smells.push(smell(file, line, &enm.ident.to_string()));
+                    smells.push(smell(file, line, &enm.ident));
                 }
                 _ => {}
             }
@@ -42,7 +42,7 @@ impl Detector for FfiTypeNotReprCDetector {
     }
 }
 
-fn smell(file: &SourceFile, line: usize, name: &str) -> Smell {
+fn smell(file: &SourceFile, line: usize, name: &syn::Ident) -> Smell {
     Smell::new(
         SmellCategory::Unsafe,
         "FFI Type Not repr(C)",

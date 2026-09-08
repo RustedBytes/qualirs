@@ -89,3 +89,42 @@ were not changed to force an empty report.
 - Raw before/after reports are under `target/self-audit/`.
 
 No replacement snippets or automatic source transformations were introduced.
+
+## Follow-up: refactoring the reported code
+
+After the detector audit, the remaining source-level issues were refactored
+without changing detector thresholds, confidence policies, or ignore lists.
+
+| Mode | Before refactoring | After refactoring | Critical before / after |
+|---|---:|---:|---:|
+| Conservative | 0 | 0 | 0 / 0 |
+| Balanced | 33 | 2 | 2 / 0 |
+| Exploratory | 40 | 6 | 2 / 0 |
+
+The refactored tree contains 156 Rust files. The changes separate item-name
+resolution from expression/type inference, move test-exclusion visitors out of
+`analysis_view`, and put collection-use analysis in a dedicated internal module.
+Detector callbacks now delegate to named helpers for eligibility, evidence, and
+reporting. Constructor and public-error checks use smaller predicates and flatter
+traversal. Lock-use state owns its finding decision.
+
+Duration formatting uses named unit constants and reserves its four possible
+output parts. FFI declaration collection reserves an upper bound from the foreign
+item counts. Identifier strings are created once per lookup instead of repeatedly
+inside a binding search, and FFI diagnostics format identifiers directly.
+
+Six findings remain deliberately visible: the 15-variant `Kind` taxonomy, four
+unproven inline candidates, and the transitive `getrandom` version duplication.
+Splitting the taxonomy solely to meet a variant-count threshold would obscure its
+purpose; adding inline attributes needs profiling, and dependency upgrades are a
+separate change. The old inline hint on `stmt_contains_ident` also disappears
+because its callers moved into the collection module; this is a consequence of
+the detector's file-local call counting, not evidence of faster code.
+
+Validation: all 446 offline tests pass. Both the original and refactored detectors
+were run on the same archived source tree at `45141bf`; all 40 complete finding
+records match, including locations, confidence, messages, and suggestions. This
+checks behavior on that snapshot alongside the existing positive and negative
+regressions, rather than inferring correctness from a smaller self-scan count.
+The release build and all three precision modes were also checked, with no parse
+errors or critical exits. Reports are under `target/self-audit/refactor-*`.

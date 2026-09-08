@@ -69,33 +69,52 @@ fn render(stats: &ResourceStats) -> String {
     )
 }
 
+const NANOS_PER_MICROSECOND: u128 = 1_000;
+const NANOS_PER_MILLISECOND: u128 = 1_000_000;
+const MILLIS_PER_SECOND: u128 = 1_000;
+const SECONDS_PER_MINUTE: u128 = 60;
+const SECONDS_PER_HOUR: u128 = 60 * SECONDS_PER_MINUTE;
+const SECONDS_PER_DAY: u128 = 24 * SECONDS_PER_HOUR;
+const DURATION_UNITS: [(&str, u128); 3] = [
+    ("d", SECONDS_PER_DAY),
+    ("h", SECONDS_PER_HOUR),
+    ("min", SECONDS_PER_MINUTE),
+];
+
 fn format_duration(duration: Duration) -> String {
     let nanos = duration.as_nanos();
     if nanos == 0 {
         return "0 s".into();
     }
     // Round before splitting units, so 59.9999 seconds becomes 1 minute.
-    let millis = (nanos + 500_000) / 1_000_000;
-    if millis >= 1000 {
-        let mut seconds = millis / 1000;
-        let mut parts = Vec::new();
-        for (unit, size) in [("d", 86_400), ("h", 3600), ("min", 60)] {
+    let millis = (nanos + NANOS_PER_MILLISECOND / 2) / NANOS_PER_MILLISECOND;
+    if millis >= MILLIS_PER_SECOND {
+        let mut seconds = millis / MILLIS_PER_SECOND;
+        let mut parts = Vec::with_capacity(DURATION_UNITS.len() + 1);
+        for (unit, size) in DURATION_UNITS {
             let count = seconds / size;
             if count > 0 {
                 parts.push(format!("{count} {unit}"));
             }
             seconds %= size;
         }
-        if seconds > 0 || millis % 1000 > 0 || parts.is_empty() {
-            let value = seconds as f64 + (millis % 1000) as f64 / 1000.0;
+        if seconds > 0 || millis % MILLIS_PER_SECOND > 0 || parts.is_empty() {
+            let value =
+                seconds as f64 + (millis % MILLIS_PER_SECOND) as f64 / MILLIS_PER_SECOND as f64;
             parts.push(format!("{} s", compact_decimal(value)));
         }
         return parts.join(" ");
     }
-    if nanos >= 1_000_000 {
-        format!("{} ms", compact_decimal(nanos as f64 / 1_000_000.0))
-    } else if nanos >= 1000 {
-        format!("{} µs", compact_decimal(nanos as f64 / 1000.0))
+    if nanos >= NANOS_PER_MILLISECOND {
+        format!(
+            "{} ms",
+            compact_decimal(nanos as f64 / NANOS_PER_MILLISECOND as f64)
+        )
+    } else if nanos >= NANOS_PER_MICROSECOND {
+        format!(
+            "{} µs",
+            compact_decimal(nanos as f64 / NANOS_PER_MICROSECOND as f64)
+        )
     } else {
         format!("{nanos} ns")
     }

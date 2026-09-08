@@ -33,9 +33,7 @@ impl Kind {
 
 #[derive(Clone, Default)]
 pub(crate) struct Context {
-    names: HashMap<String, String>,
-    aliases: HashMap<String, syn::Type>,
-    returns: HashMap<String, Kind>,
+    items: ItemScope,
     bindings: Vec<HashMap<String, Kind>>,
     origins: HashMap<String, (usize, usize)>,
     pub in_async: bool,
@@ -54,57 +52,29 @@ impl Context {
     }
 
     fn add_items(&mut self, items: &[syn::Item]) {
-        // Item declarations shadow both prelude names and external crate names.
-        for item in items {
-            let ident = match item {
-                syn::Item::Struct(i) => Some(&i.ident),
-                syn::Item::Enum(i) => Some(&i.ident),
-                syn::Item::Type(i) => Some(&i.ident),
-                syn::Item::Mod(i) => Some(&i.ident),
-                syn::Item::Fn(i) => Some(&i.sig.ident),
-                syn::Item::Trait(i) => Some(&i.ident),
-                _ => None,
-            };
-            if let Some(ident) = ident {
-                self.names.insert(ident.to_string(), "<local>".into());
-                self.aliases.remove(&ident.to_string());
-                self.returns.remove(&ident.to_string());
-            }
-        }
-        for item in items {
-            if let syn::Item::Type(item) = item
-                && item.generics.params.is_empty()
-            {
-                self.aliases
-                    .insert(item.ident.to_string(), (*item.ty).clone());
-            }
-            if let syn::Item::Use(item) = item {
-                self.add_use(
-                    if item.leading_colon.is_some() {
-                        "::"
-                    } else {
-                        ""
-                    },
-                    &item.tree,
-                );
-            }
-        }
+        self.items.add_declarations(items);
+        self.items.add_imports_and_aliases(items);
+        self.add_return_types(items);
+    }
+
+    fn add_return_types(&mut self, items: &[syn::Item]) {
         for item in items {
             if let syn::Item::Fn(item) = item {
                 let mut signature_context = self.clone();
                 for p in &item.sig.generics.params {
                     if let syn::GenericParam::Type(t) = p {
                         signature_context
+                            .items
                             .names
                             .insert(t.ident.to_string(), "<generic>".into());
-                        signature_context.aliases.remove(&t.ident.to_string());
+                        signature_context.items.aliases.remove(&t.ident.to_string());
                     }
                 }
                 let output = match &item.sig.output {
                     syn::ReturnType::Default => Kind::Unit,
                     syn::ReturnType::Type(_, ty) => signature_context.kind(ty),
                 };
-                self.returns.insert(
+                self.items.returns.insert(
                     item.sig.ident.to_string(),
                     if item.sig.asyncness.is_some() {
                         Kind::Future(Box::new(output))
@@ -116,48 +86,6 @@ impl Context {
         }
     }
 
-    fn add_use(&mut self, prefix: &str, tree: &syn::UseTree) {
-        match tree {
-            syn::UseTree::Path(p) => self.add_use(&format!("{prefix}{}::", p.ident), &p.tree),
-            syn::UseTree::Name(n) => {
-                let target = if n.ident == "self" {
-                    prefix.trim_end_matches("::").to_string()
-                } else {
-                    format!("{prefix}{}", n.ident)
-                };
-                let name = target.rsplit("::").next().unwrap_or("").to_string();
-                self.import_name(name, target);
-            }
-            syn::UseTree::Rename(n) => {
-                self.import_name(n.rename.to_string(), format!("{prefix}{}", n.ident));
-            }
-            syn::UseTree::Group(g) => {
-                for item in &g.items {
-                    self.add_use(prefix, item);
-                }
-            }
-            syn::UseTree::Glob(_) => {} // A glob provides no reliable local resolution.
-        }
-    }
-
-    fn import_name(&mut self, name: String, target: String) {
-        let mut parts = target.splitn(2, "::");
-        let first = parts.next().unwrap_or("");
-        let resolved = if let Some(absolute) = target.strip_prefix("::") {
-            absolute.to_string()
-        } else if let Some(root) = self.names.get(first) {
-            parts
-                .next()
-                .map(|rest| format!("{root}::{rest}"))
-                .unwrap_or_else(|| root.clone())
-        } else {
-            target
-        };
-        self.returns.remove(&name);
-        self.aliases.remove(&name);
-        self.names.insert(name, resolved);
-    }
-
     pub fn path(&self, path: &syn::Path) -> String {
         let mut parts = path.segments.iter().map(|s| s.ident.to_string());
         let Some(first) = parts.next() else {
@@ -167,7 +95,11 @@ impl Context {
             if self.bindings.iter().rev().any(|s| s.contains_key(&first)) {
                 "<binding>"
             } else {
-                self.names.get(&first).map(String::as_str).unwrap_or(&first)
+                self.items
+                    .names
+                    .get(&first)
+                    .map(String::as_str)
+                    .unwrap_or(&first)
             }
         } else {
             &first
@@ -198,7 +130,7 @@ impl Context {
                 syn::Type::Group(g) => proven(ctx, &g.elem, depth + 1),
                 syn::Type::Path(p) if p.qself.is_none() => {
                     if let Some(name) = p.path.get_ident()
-                        && let Some(alias) = ctx.aliases.get(&name.to_string())
+                        && let Some(alias) = ctx.items.aliases.get(&name.to_string())
                     {
                         return proven(ctx, alias, depth + 1);
                     }
@@ -260,102 +192,75 @@ impl Context {
             syn::Type::Paren(p) => self.kind_at(&p.elem, depth + 1),
             syn::Type::Group(g) => self.kind_at(&g.elem, depth + 1),
             syn::Type::Tuple(t) if t.elems.is_empty() => Kind::Unit,
-            syn::Type::Path(p) if p.qself.is_none() => {
-                if let Some(name) = p.path.get_ident()
-                    && let Some(alias) = self.aliases.get(&name.to_string())
-                {
-                    return self.kind_at(alias, depth + 1);
-                }
-                let path = self.path(&p.path);
-                match path.as_str() {
-                    "bool" | "char" | "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8"
-                    | "i16" | "i32" | "i64" | "i128" | "isize" | "f32" | "f64" => Kind::Copy,
-                    "String" | "str" | "std::string::String" | "alloc::string::String" => {
-                        Kind::String
-                    }
-                    "Vec" | "std::vec::Vec" | "alloc::vec::Vec" => Kind::Vec,
-                    "std::sync::Mutex" | "std::sync::RwLock" => Kind::SyncLock,
-                    "std::sync::MutexGuard"
-                    | "std::sync::RwLockReadGuard"
-                    | "std::sync::RwLockWriteGuard" => Kind::Guard,
-                    "tokio::sync::Mutex" | "tokio::sync::RwLock" => Kind::AsyncLock,
-                    "std::sync::mpsc::Receiver" | "crossbeam_channel::Receiver" => {
-                        Kind::SyncReceiver
-                    }
-                    "std::sync::mpsc::Sender" | "std::sync::mpsc::SyncSender" => Kind::SyncSender,
-                    "std::fs::File" | "std::io::BufWriter" => Kind::Writer,
-                    "Result"
-                    | "std::result::Result"
-                    | "core::result::Result"
-                    | "std::io::Result"
-                    | "std::fmt::Result" => {
-                        let inner = p
-                            .path
-                            .segments
-                            .last()
-                            .and_then(|s| match &s.arguments {
-                                syn::PathArguments::AngleBracketed(a) => {
-                                    a.args.iter().find_map(|a| match a {
-                                        syn::GenericArgument::Type(t) => {
-                                            Some(self.kind_at(t, depth + 1))
-                                        }
-                                        _ => None,
-                                    })
-                                }
-                                _ => None,
-                            })
-                            .unwrap_or(Kind::Unknown);
-                        Kind::Result(Box::new(inner))
-                    }
-                    "std::sync::Arc" | "alloc::sync::Arc" | "Box" | "std::boxed::Box"
-                    | "alloc::boxed::Box" => {
-                        let inner = p
-                            .path
-                            .segments
-                            .last()
-                            .and_then(|s| match &s.arguments {
-                                syn::PathArguments::AngleBracketed(a) => {
-                                    a.args.iter().find_map(|a| match a {
-                                        syn::GenericArgument::Type(t) => {
-                                            Some(self.kind_at(t, depth + 1))
-                                        }
-                                        _ => None,
-                                    })
-                                }
-                                _ => None,
-                            })
-                            .unwrap_or(Kind::Unknown);
-                        Kind::Reference(Box::new(inner))
-                    }
-                    _ => Kind::Unknown,
-                }
+            syn::Type::Path(p) if p.qself.is_none() => self.path_kind(p, depth),
+            _ => Kind::Unknown,
+        }
+    }
+
+    fn path_kind(&self, p: &syn::TypePath, depth: usize) -> Kind {
+        if let Some(name) = p.path.get_ident()
+            && let Some(alias) = self.items.aliases.get(&name.to_string())
+        {
+            return self.kind_at(alias, depth + 1);
+        }
+        let path = self.path(&p.path);
+        match path.as_str() {
+            "bool" | "char" | "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16"
+            | "i32" | "i64" | "i128" | "isize" | "f32" | "f64" => Kind::Copy,
+            "String" | "str" | "std::string::String" | "alloc::string::String" => Kind::String,
+            "Vec" | "std::vec::Vec" | "alloc::vec::Vec" => Kind::Vec,
+            "std::sync::Mutex" | "std::sync::RwLock" => Kind::SyncLock,
+            "std::sync::MutexGuard"
+            | "std::sync::RwLockReadGuard"
+            | "std::sync::RwLockWriteGuard" => Kind::Guard,
+            "tokio::sync::Mutex" | "tokio::sync::RwLock" => Kind::AsyncLock,
+            "std::sync::mpsc::Receiver" | "crossbeam_channel::Receiver" => Kind::SyncReceiver,
+            "std::sync::mpsc::Sender" | "std::sync::mpsc::SyncSender" => Kind::SyncSender,
+            "std::fs::File" | "std::io::BufWriter" => Kind::Writer,
+            "Result"
+            | "std::result::Result"
+            | "core::result::Result"
+            | "std::io::Result"
+            | "std::fmt::Result" => {
+                let inner = self.first_type_argument(&p.path, depth);
+                Kind::Result(Box::new(inner))
+            }
+            "std::sync::Arc" | "alloc::sync::Arc" | "Box" | "std::boxed::Box"
+            | "alloc::boxed::Box" => {
+                let inner = self.first_type_argument(&p.path, depth);
+                Kind::Reference(Box::new(inner))
             }
             _ => Kind::Unknown,
         }
     }
 
+    fn first_type_argument(&self, path: &syn::Path, depth: usize) -> Kind {
+        let Some(segment) = path.segments.last() else {
+            return Kind::Unknown;
+        };
+        let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+            return Kind::Unknown;
+        };
+        args.args
+            .iter()
+            .find_map(|arg| match arg {
+                syn::GenericArgument::Type(ty) => Some(self.kind_at(ty, depth + 1)),
+                _ => None,
+            })
+            .unwrap_or(Kind::Unknown)
+    }
+
     pub fn expr(&self, expr: &syn::Expr) -> Kind {
         match expr {
-            syn::Expr::Path(p) => ident(expr)
+            syn::Expr::Path(_) => ident(expr)
                 .and_then(|n| self.bindings.iter().rev().find_map(|s| s.get(&n)))
                 .cloned()
-                .unwrap_or_else(|| {
-                    let _ = p;
-                    Kind::Unknown
-                }),
+                .unwrap_or(Kind::Unknown),
             syn::Expr::Paren(p) => self.expr(&p.expr),
             syn::Expr::Group(g) => self.expr(&g.expr),
             syn::Expr::Reference(r) => Kind::Reference(Box::new(self.expr(&r.expr))),
             syn::Expr::Cast(c) => self.kind(&c.ty),
-            syn::Expr::Lit(l) => match l.lit {
-                syn::Lit::Str(_) => Kind::Reference(Box::new(Kind::String)),
-                syn::Lit::Int(_)
-                | syn::Lit::Float(_)
-                | syn::Lit::Bool(_)
-                | syn::Lit::Char(_)
-                | syn::Lit::Byte(_) => Kind::Copy,
-                _ => Kind::Unknown,
-            },
+            syn::Expr::Lit(l) => literal_kind(&l.lit),
             syn::Expr::Try(t) => match self.expr(&t.expr) {
                 Kind::Result(k) => *k,
                 _ => Kind::Unknown,
@@ -364,60 +269,59 @@ impl Context {
                 Kind::Future(k) => *k,
                 _ => Kind::Unknown,
             },
-            syn::Expr::Call(c) => {
-                let syn::Expr::Path(p) = &*c.func else {
-                    return Kind::Unknown;
-                };
-                if let Some(name) = p.path.get_ident()
-                    && !self
-                        .bindings
-                        .iter()
-                        .rev()
-                        .any(|s| s.contains_key(&name.to_string()))
-                    && let Some(k) = self.returns.get(&name.to_string())
-                {
-                    return k.clone();
-                }
-                let path = self.path(&p.path);
-                match path.as_str() {
-                    "String::new"
-                    | "String::from"
-                    | "String::with_capacity"
-                    | "std::string::String::new" => Kind::String,
-                    "Vec::new" | "Vec::with_capacity" | "std::vec::Vec::new" => Kind::Vec,
-                    "std::sync::Mutex::new" | "std::sync::RwLock::new" => Kind::SyncLock,
-                    "tokio::sync::Mutex::new" | "tokio::sync::RwLock::new" => Kind::AsyncLock,
-                    _ if is_fs_result(&path) => {
-                        let result = Kind::Result(Box::new(Kind::Unknown));
-                        if path.starts_with("tokio::") {
-                            Kind::Future(Box::new(result))
-                        } else {
-                            result
-                        }
-                    }
-                    _ => Kind::Unknown,
-                }
-            }
-            syn::Expr::MethodCall(c) => {
-                let receiver = self.expr(&c.receiver);
-                match (receiver.value(), c.method.to_string().as_str()) {
-                    (Kind::Result(k), "unwrap" | "expect") => *k.clone(),
-                    (Kind::SyncLock, "lock" | "read" | "write") => {
-                        Kind::Result(Box::new(Kind::Guard))
-                    }
-                    (Kind::SyncReceiver, "recv" | "recv_timeout")
-                    | (Kind::SyncSender, "send")
-                    | (
-                        Kind::Writer,
-                        "write" | "write_all" | "read" | "read_to_end" | "read_to_string" | "flush",
-                    ) => Kind::Result(Box::new(Kind::Unknown)),
-                    (Kind::String, "to_owned" | "to_string" | "clone") => Kind::String,
-                    (Kind::Vec, "clone") => Kind::Vec,
-                    _ => Kind::Unknown,
-                }
-            }
+            syn::Expr::Call(c) => self.call_kind(c),
+            syn::Expr::MethodCall(c) => self.method_kind(c),
             syn::Expr::Macro(m) if m.mac.path.is_ident("vec") => Kind::Vec,
             syn::Expr::Macro(m) if m.mac.path.is_ident("format") => Kind::String,
+            _ => Kind::Unknown,
+        }
+    }
+
+    fn call_kind(&self, c: &syn::ExprCall) -> Kind {
+        let syn::Expr::Path(p) = &*c.func else {
+            return Kind::Unknown;
+        };
+        let local_name = p.path.get_ident().map(ToString::to_string);
+        if let Some(name) = local_name.as_deref()
+            && !self.bindings.iter().rev().any(|s| s.contains_key(name))
+            && let Some(k) = self.items.returns.get(name)
+        {
+            return k.clone();
+        }
+        let path = self.path(&p.path);
+        match path.as_str() {
+            "String::new"
+            | "String::from"
+            | "String::with_capacity"
+            | "std::string::String::new" => Kind::String,
+            "Vec::new" | "Vec::with_capacity" | "std::vec::Vec::new" => Kind::Vec,
+            "std::sync::Mutex::new" | "std::sync::RwLock::new" => Kind::SyncLock,
+            "tokio::sync::Mutex::new" | "tokio::sync::RwLock::new" => Kind::AsyncLock,
+            _ if is_fs_result(&path) => {
+                let result = Kind::Result(Box::new(Kind::Unknown));
+                if path.starts_with("tokio::") {
+                    Kind::Future(Box::new(result))
+                } else {
+                    result
+                }
+            }
+            _ => Kind::Unknown,
+        }
+    }
+
+    fn method_kind(&self, c: &syn::ExprMethodCall) -> Kind {
+        let receiver = self.expr(&c.receiver);
+        match (receiver.value(), c.method.to_string().as_str()) {
+            (Kind::Result(k), "unwrap" | "expect") => *k.clone(),
+            (Kind::SyncLock, "lock" | "read" | "write") => Kind::Result(Box::new(Kind::Guard)),
+            (Kind::SyncReceiver, "recv" | "recv_timeout")
+            | (Kind::SyncSender, "send")
+            | (
+                Kind::Writer,
+                "write" | "write_all" | "read" | "read_to_end" | "read_to_string" | "flush",
+            ) => Kind::Result(Box::new(Kind::Unknown)),
+            (Kind::String, "to_owned" | "to_string" | "clone") => Kind::String,
+            (Kind::Vec, "clone") => Kind::Vec,
             _ => Kind::Unknown,
         }
     }
@@ -639,6 +543,7 @@ impl<F: FnMut(&syn::Expr, &Context)> Scanner<F> {
         for generic in &sig.generics.params {
             if let syn::GenericParam::Type(t) = generic {
                 self.context
+                    .items
                     .names
                     .insert(t.ident.to_string(), "<generic>".into());
             }
@@ -738,9 +643,7 @@ impl<'a, F: FnMut(&syn::Expr, &Context)> Visit<'a> for Scanner<F> {
         let block = self.context.block;
         let start = n.brace_token.span.open().start();
         self.context.block = (start.line, start.column);
-        let names = self.context.names.clone();
-        let returns = self.context.returns.clone();
-        let aliases = self.context.aliases.clone();
+        let saved_items = self.context.items.clone();
         let origins = self.context.origins.clone();
         let items: Vec<_> = n
             .stmts
@@ -768,9 +671,7 @@ impl<'a, F: FnMut(&syn::Expr, &Context)> Visit<'a> for Scanner<F> {
             }
         }
         self.context.bindings.pop();
-        self.context.names = names;
-        self.context.returns = returns;
-        self.context.aliases = aliases;
+        self.context.items = saved_items;
         self.context.origins = origins;
         self.context.block = block;
     }
@@ -916,5 +817,109 @@ impl<'a, F: FnMut(&syn::Expr, &Context)> Visit<'a> for Scanner<F> {
         self.visit_block(&n.body);
         self.context = prev;
         self.context.forget_guards();
+    }
+}
+
+fn literal_kind(lit: &syn::Lit) -> Kind {
+    match lit {
+        syn::Lit::Str(_) => Kind::Reference(Box::new(Kind::String)),
+        syn::Lit::Int(_)
+        | syn::Lit::Float(_)
+        | syn::Lit::Bool(_)
+        | syn::Lit::Char(_)
+        | syn::Lit::Byte(_) => Kind::Copy,
+        _ => Kind::Unknown,
+    }
+}
+
+#[derive(Clone, Default)]
+struct ItemScope {
+    names: HashMap<String, String>,
+    aliases: HashMap<String, syn::Type>,
+    returns: HashMap<String, Kind>,
+}
+
+impl ItemScope {
+    fn add_declarations(&mut self, items: &[syn::Item]) {
+        // Item declarations shadow both prelude names and external crate names.
+        for item in items {
+            let ident = match item {
+                syn::Item::Struct(i) => Some(&i.ident),
+                syn::Item::Enum(i) => Some(&i.ident),
+                syn::Item::Type(i) => Some(&i.ident),
+                syn::Item::Mod(i) => Some(&i.ident),
+                syn::Item::Fn(i) => Some(&i.sig.ident),
+                syn::Item::Trait(i) => Some(&i.ident),
+                _ => None,
+            };
+            if let Some(ident) = ident {
+                self.names.insert(ident.to_string(), "<local>".into());
+                self.aliases.remove(&ident.to_string());
+                self.returns.remove(&ident.to_string());
+            }
+        }
+    }
+
+    fn add_imports_and_aliases(&mut self, items: &[syn::Item]) {
+        for item in items {
+            if let syn::Item::Type(item) = item
+                && item.generics.params.is_empty()
+            {
+                self.aliases
+                    .insert(item.ident.to_string(), (*item.ty).clone());
+            }
+            if let syn::Item::Use(item) = item {
+                self.add_use(
+                    if item.leading_colon.is_some() {
+                        "::"
+                    } else {
+                        ""
+                    },
+                    &item.tree,
+                );
+            }
+        }
+    }
+
+    fn add_use(&mut self, prefix: &str, tree: &syn::UseTree) {
+        match tree {
+            syn::UseTree::Path(p) => self.add_use(&format!("{prefix}{}::", p.ident), &p.tree),
+            syn::UseTree::Name(n) => {
+                let target = if n.ident == "self" {
+                    prefix.trim_end_matches("::").to_string()
+                } else {
+                    format!("{prefix}{}", n.ident)
+                };
+                let name = target.rsplit("::").next().unwrap_or("").to_string();
+                self.import_name(name, target);
+            }
+            syn::UseTree::Rename(n) => {
+                self.import_name(n.rename.to_string(), format!("{prefix}{}", n.ident));
+            }
+            syn::UseTree::Group(g) => {
+                for item in &g.items {
+                    self.add_use(prefix, item);
+                }
+            }
+            syn::UseTree::Glob(_) => {} // A glob provides no reliable local resolution.
+        }
+    }
+
+    fn import_name(&mut self, name: String, target: String) {
+        let mut parts = target.splitn(2, "::");
+        let first = parts.next().unwrap_or("");
+        let resolved = if let Some(absolute) = target.strip_prefix("::") {
+            absolute.to_string()
+        } else if let Some(root) = self.names.get(first) {
+            parts
+                .next()
+                .map(|rest| format!("{root}::{rest}"))
+                .unwrap_or_else(|| root.clone())
+        } else {
+            target
+        };
+        self.returns.remove(&name);
+        self.aliases.remove(&name);
+        self.names.insert(name, resolved);
     }
 }

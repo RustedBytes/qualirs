@@ -101,44 +101,18 @@ impl Detector for UnusedResultDetector {
         discarded.visit_file(&file.ast);
         let mut findings = Vec::new();
         evidence::inspect(&file.ast, |expr, ctx| {
-            let p = expr.span().start();
             // Remove the expression position so wrappers cannot accidentally report an inner Result.
             let Some((documented, in_drop)) =
                 discarded.values.remove(&evidence::span_key(expr.span()))
             else {
                 return;
             };
-            let cleanup = matches!(expr, syn::Expr::Call(c) if matches!(&*c.func, syn::Expr::Path(p)
-                if matches!(ctx.path(&p.path).as_str(), "std::fs::remove_file" | "std::fs::remove_dir")));
-            let documented = documented || in_drop && cleanup;
-            let confidence = if matches!(ctx.expr(expr), Kind::Result(_)) {
-                Some(if documented {
-                    FindingConfidence::Low
-                } else {
-                    FindingConfidence::High
-                })
-            } else if ctx.expr(expr) == Kind::Unknown && heuristic_result(expr, ctx) {
-                Some(FindingConfidence::Low)
-            } else {
-                None
+            let intent = match (documented, in_drop) {
+                (true, _) => DiscardIntent::BestEffort,
+                (false, true) => DiscardIntent::Destructor,
+                (false, false) => DiscardIntent::Undocumented,
             };
-            if let Some(confidence) = confidence {
-                findings.push(Smell::new(
-                    SmellCategory::Idiomaticity,
-                    self.name(),
-                    Severity::Warning,
-                    confidence,
-                    SourceLocation::new(file.path.clone(), p.line, p.line, None),
-                    if confidence == FindingConfidence::High {
-                        "A Result is discarded without handling its error"
-                    } else if documented && matches!(ctx.expr(expr), Kind::Result(_)) {
-                        "A Result is discarded in destructor or documented best-effort code; review error observability"
-                    } else {
-                        "This discarded expression may return a Result; its type is unresolved"
-                    },
-                    "Handle the error or document why discarding it is intentional.",
-                ));
-            }
+            findings.extend(discarded_result_finding(expr, ctx, file, intent));
         });
         findings
     }
@@ -182,4 +156,53 @@ fn heuristic_result(expr: &syn::Expr, ctx: &evidence::Context) -> bool {
         }
         _ => false,
     }
+}
+
+fn discarded_result_finding(
+    expr: &syn::Expr,
+    ctx: &evidence::Context,
+    file: &SourceFile,
+    intent: DiscardIntent,
+) -> Option<Smell> {
+    let p = expr.span().start();
+    let cleanup = matches!(expr, syn::Expr::Call(c) if matches!(&*c.func, syn::Expr::Path(p)
+    if matches!(ctx.path(&p.path).as_str(), "std::fs::remove_file" | "std::fs::remove_dir")));
+    let documented = matches!(intent, DiscardIntent::BestEffort)
+        || matches!(intent, DiscardIntent::Destructor) && cleanup;
+    let confidence = if matches!(ctx.expr(expr), Kind::Result(_)) {
+        Some(if documented {
+            FindingConfidence::Low
+        } else {
+            FindingConfidence::High
+        })
+    } else if ctx.expr(expr) == Kind::Unknown && heuristic_result(expr, ctx) {
+        Some(FindingConfidence::Low)
+    } else {
+        None
+    };
+    if let Some(confidence) = confidence {
+        Some(Smell::new(
+            SmellCategory::Idiomaticity,
+            UnusedResultDetector.name(),
+            Severity::Warning,
+            confidence,
+            SourceLocation::new(file.path.clone(), p.line, p.line, None),
+            if confidence == FindingConfidence::High {
+                "A Result is discarded without handling its error"
+            } else if documented && matches!(ctx.expr(expr), Kind::Result(_)) {
+                "A Result is discarded in destructor or documented best-effort code; review error observability"
+            } else {
+                "This discarded expression may return a Result; its type is unresolved"
+            },
+            "Handle the error or document why discarding it is intentional.",
+        ))
+    } else {
+        None
+    }
+}
+
+enum DiscardIntent {
+    Undocumented,
+    BestEffort,
+    Destructor,
 }

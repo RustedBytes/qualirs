@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::{LazyLock, RwLock};
+use syn::{spanned::Spanned, visit::Visit};
 
 use crate::domain::config::PolicyConfig;
 use crate::domain::source::SourceFile;
@@ -146,88 +147,8 @@ fn cfg_without_test(meta: &syn::Meta) -> Option<bool> {
 /// Mask excluded items before parsing a detector view, keeping character columns
 /// and line numbers intact for diagnostics and ignore directives.
 pub(crate) fn analysis_view(source: &SourceFile, policy: &PolicyConfig) -> Option<SourceFile> {
-    use syn::{spanned::Spanned, visit::Visit};
     if !policy.skip_tests {
         return None;
-    }
-    struct Excluded(Vec<proc_macro2::Span>);
-    impl<'a> Visit<'a> for Excluded {
-        fn visit_stmt(&mut self, stmt: &'a syn::Stmt) {
-            let attrs: &[syn::Attribute] = match stmt {
-                syn::Stmt::Local(l) => &l.attrs,
-                syn::Stmt::Expr(e, _) => match e {
-                    syn::Expr::Call(e) => &e.attrs,
-                    syn::Expr::MethodCall(e) => &e.attrs,
-                    syn::Expr::Block(e) => &e.attrs,
-                    syn::Expr::Unsafe(e) => &e.attrs,
-                    syn::Expr::Async(e) => &e.attrs,
-                    syn::Expr::Await(e) => &e.attrs,
-                    syn::Expr::If(e) => &e.attrs,
-                    syn::Expr::Match(e) => &e.attrs,
-                    syn::Expr::ForLoop(e) => &e.attrs,
-                    syn::Expr::While(e) => &e.attrs,
-                    syn::Expr::Loop(e) => &e.attrs,
-                    syn::Expr::Macro(e) => &e.attrs,
-                    _ => &[],
-                },
-                syn::Stmt::Macro(m) => &m.attrs,
-                _ => &[],
-            };
-            if attrs.iter().any(attr_is_test_cfg) {
-                self.0.push(stmt.span());
-            } else {
-                syn::visit::visit_stmt(self, stmt);
-            }
-        }
-        fn visit_item(&mut self, item: &'a syn::Item) {
-            let attrs: &[syn::Attribute] = match item {
-                syn::Item::Fn(i) => &i.attrs,
-                syn::Item::Mod(i) => &i.attrs,
-                syn::Item::Struct(i) => &i.attrs,
-                syn::Item::Enum(i) => &i.attrs,
-                syn::Item::Impl(i) => &i.attrs,
-                syn::Item::Trait(i) => &i.attrs,
-                syn::Item::Use(i) => &i.attrs,
-                syn::Item::Const(i) => &i.attrs,
-                syn::Item::Static(i) => &i.attrs,
-                syn::Item::Type(i) => &i.attrs,
-                syn::Item::Macro(i) => &i.attrs,
-                syn::Item::ForeignMod(i) => &i.attrs,
-                syn::Item::Union(i) => &i.attrs,
-                _ => &[],
-            };
-            if attrs.iter().any(attr_is_test_cfg) {
-                self.0.push(item.span());
-            } else {
-                syn::visit::visit_item(self, item);
-            }
-        }
-        fn visit_impl_item(&mut self, item: &'a syn::ImplItem) {
-            let attrs: &[syn::Attribute] = match item {
-                syn::ImplItem::Fn(i) => &i.attrs,
-                syn::ImplItem::Const(i) => &i.attrs,
-                syn::ImplItem::Type(i) => &i.attrs,
-                _ => &[],
-            };
-            if attrs.iter().any(attr_is_test_cfg) {
-                self.0.push(item.span());
-            } else {
-                syn::visit::visit_impl_item(self, item);
-            }
-        }
-        fn visit_trait_item(&mut self, item: &'a syn::TraitItem) {
-            let attrs: &[syn::Attribute] = match item {
-                syn::TraitItem::Fn(i) => &i.attrs,
-                syn::TraitItem::Const(i) => &i.attrs,
-                syn::TraitItem::Type(i) => &i.attrs,
-                _ => &[],
-            };
-            if attrs.iter().any(attr_is_test_cfg) {
-                self.0.push(item.span());
-            } else {
-                syn::visit::visit_trait_item(self, item);
-            }
-        }
     }
     let mut excluded = Excluded(Vec::new());
     if source.ast.attrs.iter().any(attr_is_test_cfg) {
@@ -289,4 +210,88 @@ fn is_data_carrier_name(name: &str, policy: &PolicyConfig) -> bool {
         .data_carrier_struct_suffixes
         .iter()
         .any(|suffix| name.ends_with(suffix))
+}
+
+struct Excluded(Vec<proc_macro2::Span>);
+impl<'a> Visit<'a> for Excluded {
+    fn visit_stmt(&mut self, stmt: &'a syn::Stmt) {
+        let attrs: &[syn::Attribute] = match stmt {
+            syn::Stmt::Local(l) => &l.attrs,
+            syn::Stmt::Expr(e, _) => expression_attrs(e),
+            syn::Stmt::Macro(m) => &m.attrs,
+            _ => &[],
+        };
+        if attrs.iter().any(attr_is_test_cfg) {
+            self.0.push(stmt.span());
+        } else {
+            syn::visit::visit_stmt(self, stmt);
+        }
+    }
+    fn visit_item(&mut self, item: &'a syn::Item) {
+        let attrs: &[syn::Attribute] = match item {
+            syn::Item::Fn(i) => &i.attrs,
+            syn::Item::Mod(i) => &i.attrs,
+            syn::Item::Struct(i) => &i.attrs,
+            syn::Item::Enum(i) => &i.attrs,
+            syn::Item::Impl(i) => &i.attrs,
+            syn::Item::Trait(i) => &i.attrs,
+            syn::Item::Use(i) => &i.attrs,
+            syn::Item::Const(i) => &i.attrs,
+            syn::Item::Static(i) => &i.attrs,
+            syn::Item::Type(i) => &i.attrs,
+            syn::Item::Macro(i) => &i.attrs,
+            syn::Item::ForeignMod(i) => &i.attrs,
+            syn::Item::Union(i) => &i.attrs,
+            _ => &[],
+        };
+        if attrs.iter().any(attr_is_test_cfg) {
+            self.0.push(item.span());
+        } else {
+            syn::visit::visit_item(self, item);
+        }
+    }
+    fn visit_impl_item(&mut self, item: &'a syn::ImplItem) {
+        let attrs: &[syn::Attribute] = match item {
+            syn::ImplItem::Fn(i) => &i.attrs,
+            syn::ImplItem::Const(i) => &i.attrs,
+            syn::ImplItem::Type(i) => &i.attrs,
+            _ => &[],
+        };
+        if attrs.iter().any(attr_is_test_cfg) {
+            self.0.push(item.span());
+        } else {
+            syn::visit::visit_impl_item(self, item);
+        }
+    }
+    fn visit_trait_item(&mut self, item: &'a syn::TraitItem) {
+        let attrs: &[syn::Attribute] = match item {
+            syn::TraitItem::Fn(i) => &i.attrs,
+            syn::TraitItem::Const(i) => &i.attrs,
+            syn::TraitItem::Type(i) => &i.attrs,
+            _ => &[],
+        };
+        if attrs.iter().any(attr_is_test_cfg) {
+            self.0.push(item.span());
+        } else {
+            syn::visit::visit_trait_item(self, item);
+        }
+    }
+}
+
+fn expression_attrs(e: &syn::Expr) -> &[syn::Attribute] {
+    match e {
+        syn::Expr::Call(e) => &e.attrs,
+        syn::Expr::MethodCall(e) => &e.attrs,
+        syn::Expr::Block(e) => &e.attrs,
+        syn::Expr::Unsafe(e) => &e.attrs,
+        syn::Expr::Async(e) => &e.attrs,
+        syn::Expr::Await(e) => &e.attrs,
+        syn::Expr::If(e) => &e.attrs,
+        syn::Expr::Match(e) => &e.attrs,
+        syn::Expr::ForLoop(e) => &e.attrs,
+        syn::Expr::While(e) => &e.attrs,
+        syn::Expr::Loop(e) => &e.attrs,
+        syn::Expr::Macro(e) => &e.attrs,
+        _ => &[],
+    }
 }
