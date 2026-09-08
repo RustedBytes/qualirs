@@ -71,10 +71,17 @@ mod analysis {
                 inline_candidate_severity(call_sites),
                 crate::domain::smell::FindingConfidence::Low,
                 SourceLocation::new(file.path.clone(), candidate.line, candidate.line, None),
-                format!(
-                    "Function `{}` is tiny and called {call_sites} times in this file",
-                    candidate.display_name
-                ),
+                if matches!(candidate.call_kind, CallKind::Method) {
+                    format!(
+                        "Tiny method `{}` shares its name with {call_sites} method calls; receiver types and runtime frequency are unverified",
+                        candidate.display_name
+                    )
+                } else {
+                    format!(
+                        "Tiny helper `{}` has {call_sites} syntactically matching call sites; verify their targets and runtime frequency",
+                        candidate.display_name
+                    )
+                },
                 "Consider #[inline] for small hot helpers after profiling confirms call overhead.",
             )
         })

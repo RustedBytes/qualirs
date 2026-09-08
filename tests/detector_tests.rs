@@ -1274,6 +1274,7 @@ mod deadlock_risk {
     #[test]
     fn detects_multiple_locks() {
         let code = "\
+use std::sync::Mutex;
 fn foo(m1: &Mutex<i32>, m2: &Mutex<i32>) {
     let _g1 = m1.lock().unwrap();
     let _g2 = m2.lock().unwrap();

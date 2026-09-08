@@ -19,24 +19,22 @@ impl Detector for CyclomaticComplexityDetector {
         let thresholds = crate::domain::config::current_thresholds();
         let mut smells = Vec::new();
 
-        for item in &file.ast.items {
-            if let syn::Item::Fn(fn_item) = item {
-                let mut visitor = CcVisitor { cc: 1 };
-                visitor.visit_block(&fn_item.block);
+        crate::analysis::visitor::visit_functions(&file.ast, |sig, block| {
+            let mut visitor = CcVisitor { cc: 1 };
+            visitor.visit_block(block);
 
-                if visitor.cc > thresholds.r#impl.control_flow.cyclomatic_complexity {
-                    let line = fn_item.sig.fn_token.span.start().line;
+            if visitor.cc > thresholds.r#impl.control_flow.cyclomatic_complexity {
+                let line = sig.fn_token.span.start().line;
 
-                    smells.push(complexity_smell(
-                        file,
-                        &fn_item.sig.ident,
-                        visitor.cc,
-                        thresholds.r#impl.control_flow.cyclomatic_complexity,
-                        line,
-                    ));
-                }
+                smells.push(complexity_smell(
+                    file,
+                    &sig.ident,
+                    visitor.cc,
+                    thresholds.r#impl.control_flow.cyclomatic_complexity,
+                    line,
+                ));
             }
-        }
+        });
 
         smells
     }
@@ -76,6 +74,11 @@ struct CcVisitor {
 }
 
 impl<'ast> Visit<'ast> for CcVisitor {
+    fn visit_item(&mut self, _: &'ast syn::Item) {}
+    fn visit_expr_closure(&mut self, _: &'ast syn::ExprClosure) {}
+    fn visit_expr_async(&mut self, _: &'ast syn::ExprAsync) {}
+    fn visit_expr_const(&mut self, _: &'ast syn::ExprConst) {}
+
     fn visit_expr_if(&mut self, node: &'ast syn::ExprIf) {
         self.cc += 1;
         syn::visit::visit_expr_if(self, node);

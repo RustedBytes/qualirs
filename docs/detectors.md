@@ -62,8 +62,8 @@ Implementation smells flag local complexity and maintainability issues inside fu
 | Q0032 | Deep Match Nesting | `match` expressions nest too deeply. | `match a { Some(x) => match x.kind { ... } }` | Use early returns, helper functions, or flattened pattern matching |
 | Q0033 | Magic Numbers | Unnamed numeric literals obscure intent. | `if payload.len() > 8192 { ... }` | `const MAX_PAYLOAD_BYTES: usize = 8192;` |
 | Q0034 | Large Enum | An enum has too many variants. | `enum Event { Created, Updated, Deleted, Retried, ... }` | Split by domain or wrap related variants in nested enums |
-| Q0035 | High Cyclomatic Complexity | A function has too many branches and decision paths. | One function with many `if`, `match`, and loop exits | Delegate each decision to focused helper functions |
-| Q0036 | Deep If/Else Nesting | Conditional logic nests beyond the threshold. | `if ok { if auth { if paid { ... } } }` | Use guard clauses: `if !ok { return Err(...) }` |
+| Q0035 | High Cyclomatic Complexity | A named function or method has too many branches in its own body. Nested helpers are measured separately; closures, async blocks, and const blocks do not inflate the enclosing function's metric. | One function with many `if`, `match`, and loop exits | Delegate each decision to focused helper functions |
+| Q0036 | Deep If/Else Nesting | Conditional logic nests beyond the threshold within one named function or method. An `else if` continues the same nesting level; nested helpers and deferred bodies do not inflate the outer metric. | `if ok { if auth { if paid { ... } } }` | Use guard clauses: `if !ok { return Err(...) }` |
 | Q0037 | Long Method Chain | A chain of method calls becomes hard to inspect or debug. | `items.iter().filter(...).map(...).flat_map(...).collect()` | Name intermediate steps or extract a pipeline function |
 | Q0038 | Unsafe Block Overuse | A file or function contains too many unsafe blocks. | Many small `unsafe { ... }` regions mixed through logic | Isolate unsafe code in one audited abstraction |
 | Q0039 | Lifetime Explosion | Signatures carry many explicit lifetimes. | `fn merge<'a, 'b, 'c, 'd>(...) -> ...` | Use owned types, structs, or elided lifetimes where possible |
@@ -100,7 +100,7 @@ Performance smells highlight allocation, copying, locking, and iteration pattern
 | Q0063 | Local Lock in Single-Threaded Scope | A resolved standard Mutex/RwLock is constructed locally and all uses are locking operations in the same execution scope. Later borrows, moves, captures, aliases, and opaque macro uses suppress the suggestion. File locks, async locks, and custom APIs are excluded. | `let value = std::sync::Mutex::new(0); *value.lock().unwrap() += 1;` | `let mut value = 0; value += 1;` when synchronization and poisoning are unnecessary |
 | Q0064 | Clone on Copy | A primitive Copy value established in the current lexical scope is cloned. | `let count: u32 = 1; count.clone()` | `count`; shadowed values and unrelated fields are analyzed separately |
 | Q0065 | Large Value Passed By Value | Large values are passed by value when borrowing would avoid copies or moves. | `fn analyze(report: BigReport)` | `fn analyze(report: &BigReport)` |
-| Q0066 | Inline Candidate | Tiny wrappers or single-use functions add call overhead and indirection. | `fn is_empty(s: &str) -> bool { s.is_empty() }` used once | Inline the expression or mark a widely used tiny function appropriately |
+| Q0066 | Inline Candidate | Exploratory hint for tiny helpers with at least three syntactically matching call sites. Method-name matches do not resolve receiver types, and static call counts do not prove runtime frequency or call overhead. | A tiny helper with several matching call sites | Verify call targets and profile overhead before adding an inline hint |
 
 ## Idiomaticity
 
@@ -127,7 +127,7 @@ Concurrency smells flag async, locking, spawning, and thread-safety patterns tha
 | Code | Item | What it catches | Bad example | Good example |
 |---|---|---|---|---|
 | Q0078 | Blocking in Async | An exact known blocking API executes in an async function, method, or block. | `async fn load() { std::fs::read(path); }` | Use async I/O or `spawn_blocking`; worker closures are separate execution contexts |
-| Q0079 | Deadlock Risk | Locks are acquired in inconsistent orders. | `lock(a); lock(b);` in one path and `lock(b); lock(a);` in another | Use one lock order or combine state under one lock |
+| Q0079 | Deadlock Risk | Exploratory hint when a locally resolved synchronous lock is acquired while a synchronous guard remains in scope. A deadlock cycle or inconsistent lock order is not established. Branches, explicit drops/moves, and deferred execution boundaries are respected; unrelated `read`/`write` methods and nonblocking `try_lock` do not count. | Hold `a.lock().unwrap()` while calling `b.lock()` | Review overlapping guards and verify consistent lock ordering across callers |
 | Q0080 | Spawn Without Join | A known spawn API discards its JoinHandle as a statement or wildcard binding. | `tokio::spawn(work());` | Return, store, or await the handle; document intentional detachment |
 | Q0081 | Missing Send Bound | Async or spawned generic work lacks a `Send` bound. | `fn spawn_task<T: Job>(job: T) { tokio::spawn(async move { job.run() }) }` | `fn spawn_task<T: Job + Send + 'static>(job: T) { ... }` |
 | Q0082 | Sync Drop Blocking | An executed, resolved synchronous operation in Drop is a warning. Unknown method behavior is exploratory; owned mutex access and deferred bodies are excluded. | `impl Drop for Client { fn drop(&mut self) { std::thread::park(); } }` | Review destructor latency and explicit shutdown; a destructor alone does not establish a critical async hazard |

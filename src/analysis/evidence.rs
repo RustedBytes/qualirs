@@ -785,6 +785,19 @@ impl<'a, F: FnMut(&syn::Expr, &Context)> Visit<'a> for Scanner<F> {
             if let Some((_, e)) = &i.diverge {
                 self.visit_expr(e);
             }
+            let pattern = match &n.pat {
+                syn::Pat::Type(p) => &*p.pat,
+                pattern => pattern,
+            };
+            // A guard moved to another binding is no longer owned by its old
+            // name. Otherwise dropping the new owner leaves stale live-guard
+            // evidence. Wildcard and by-reference bindings do not move it.
+            if kind == Kind::Guard
+                && matches!(pattern, syn::Pat::Ident(p) if p.by_ref.is_none())
+                && let Some(name) = ident(&i.expr)
+            {
+                self.context.forget(&name);
+            }
         }
         self.context.bind(&n.pat, kind);
     }

@@ -16,27 +16,25 @@ impl Detector for DeepIfElseDetector {
         let thresholds = crate::domain::config::current_thresholds();
         let mut smells = Vec::new();
 
-        for item in &file.ast.items {
-            if let syn::Item::Fn(fn_item) = item {
-                let mut visitor = IfDepthVisitor {
-                    current_depth: 0,
-                    max_depth: 0,
-                };
-                visitor.visit_block(&fn_item.block);
+        crate::analysis::visitor::visit_functions(&file.ast, |sig, block| {
+            let mut visitor = IfDepthVisitor {
+                current_depth: 0,
+                max_depth: 0,
+            };
+            visitor.visit_block(block);
 
-                if visitor.max_depth > thresholds.r#impl.control_flow.deep_if_else {
-                    let line = fn_item.sig.fn_token.span.start().line;
+            if visitor.max_depth > thresholds.r#impl.control_flow.deep_if_else {
+                let line = sig.fn_token.span.start().line;
 
-                    smells.push(if_depth_smell(
-                        file,
-                        &fn_item.sig.ident,
-                        visitor.max_depth,
-                        thresholds.r#impl.control_flow.deep_if_else,
-                        line,
-                    ));
-                }
+                smells.push(if_depth_smell(
+                    file,
+                    &sig.ident,
+                    visitor.max_depth,
+                    thresholds.r#impl.control_flow.deep_if_else,
+                    line,
+                ));
             }
-        }
+        });
 
         smells
     }
@@ -71,15 +69,30 @@ struct IfDepthVisitor {
 }
 
 impl<'ast> Visit<'ast> for IfDepthVisitor {
+    fn visit_item(&mut self, _: &'ast syn::Item) {}
+    fn visit_expr_closure(&mut self, _: &'ast syn::ExprClosure) {}
+    fn visit_expr_async(&mut self, _: &'ast syn::ExprAsync) {}
+    fn visit_expr_const(&mut self, _: &'ast syn::ExprConst) {}
+
     fn visit_expr_if(&mut self, node: &'ast syn::ExprIf) {
         self.current_depth += 1;
         if self.current_depth > self.max_depth {
             self.max_depth = self.current_depth;
         }
 
-        // Visit the then-block (contains nested ifs)
-        syn::visit::visit_expr_if(self, node);
-
+        self.visit_expr(&node.cond);
+        self.visit_block(&node.then_branch);
+        if let Some((_, alternative)) = &node.else_branch {
+            // `else if` continues the same decision chain; an explicit else
+            // block can still contain a truly nested conditional.
+            if matches!(&**alternative, syn::Expr::If(_)) {
+                self.current_depth -= 1;
+                self.visit_expr(alternative);
+                self.current_depth += 1;
+            } else {
+                self.visit_expr(alternative);
+            }
+        }
         self.current_depth -= 1;
     }
 }
